@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Disability Section Code Generator</title>
+<!-- Theme must be stamped BEFORE the stylesheet paints, or a dark-mode
+     developer gets a white flash on every load. Falls back to the OS
+     preference, then to dark. Mirrors the sibling eligibility tool. -->
+<script>
+  (function(){
+    try{
+      var t = localStorage.getItem('dscg-theme');
+      if (!t) t = (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', t);
+    } catch(e) { document.documentElement.setAttribute('data-theme','dark'); }
+  })();
+</script>
+<link rel="stylesheet" href="css/styles.css">
+<!-- highlight.js, vendored locally (vendor/highlightjs/) — no CDN, per this
+     project's own "no build step, no CDN" rule. Both themes are loaded; only
+     one is enabled at a time, kept in sync with data-theme by js/ui/nav.js
+     (same swap-the-stylesheet approach the sibling eligibility tool uses). -->
+<link rel="stylesheet" id="hljs-dark" href="vendor/highlightjs/styles/atom-one-dark.min.css">
+<link rel="stylesheet" id="hljs-light" href="vendor/highlightjs/styles/atom-one-light.min.css" disabled>
+</head>
+<body>
+<div class="app">
+
+  <header class="header">
+    <div class="brand">
+      <span class="brand-mark" id="brand-mark"></span>
+      <div>
+        <h1>Disability Section Code Generator <span class="phase-tag" id="file-count">11 files</span></h1>
+        <p class="sub">Two SOW workbook pastes become paste-in PHP/JS. Nothing leaves this page.</p>
+      </div>
+    </div>
+    <button class="theme-toggle" id="theme-toggle" type="button" onclick="toggleTheme()" aria-label="Switch theme"></button>
+  </header>
+
+  <nav class="steps" id="steps" aria-label="Progress"></nav>
+
+  <!-- ══════════════ STEP 1 — paste & parse ══════════════ -->
+  <section class="step-page on" id="step-1" aria-labelledby="s1-h">
+    <div class="page-head">
+      <h2 id="s1-h">Paste the SOW extracts</h2>
+      <p>The Excel view below shows exactly what the parser sees, so a mangled paste shows up here.</p>
+    </div>
+
+    <div class="inputs">
+      <div class="input-block">
+        <label for="input-a">Input A — Basic Details rows</label>
+        <textarea id="input-a" oninput="App.renderExcelView(this.value)" placeholder="Sl No.&#9;Label Name&#9;Type&#9;Max Length&#9;Mandatory ?&#9;Input Method&#9;Values&#9;Default Value&#9;Validations&#9;Help Text&#9;Addl Remarks"></textarea>
+      </div>
+      <div class="input-block">
+        <label for="input-b">Input B — Other Details values (Disability Category | Type of Disability)</label>
+        <textarea id="input-b" placeholder="A&#9;Blindness&#10;&#9;low vision&#10;B&#9;Deaf&#10;&#9;Hard of Hearing"></textarea>
+      </div>
+    </div>
+
+    <div class="actions">
+      <select id="sample-picker" class="btn" onchange="loadSample(this.value)" aria-label="Load a sample SOW"></select>
+      <label class="field-inline">Layout:
+        <select id="layout-override" class="btn btn-s" onchange="generate()">
+          <option value="">Auto-detect</option>
+          <option value="set1">Force Set 1</option>
+          <option value="set2">Force Set 2</option>
+        </select>
+      </label>
+    </div>
+
+    <div id="s1-status"></div>
+
+    <div class="panel">
+      <div class="excel-view-hdr">
+        <h2>Input A — Excel view <span class="muted excel-view-summary-text"></span></h2>
+        <button class="btn btn-s" onclick="toggleExcelView(this)">Hide</button>
+      </div>
+      <div class="excel-view-mount excel-view-body"></div>
+    </div>
+
+    <div class="action-bar">
+      <div class="action-bar-grp">
+        <button class="btn btn-accent" id="btn-step2" onclick="parseAndReview()">Configure &amp; Review</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════ STEP 2 — configure & review ══════════════ -->
+  <section class="step-page" id="step-2" aria-labelledby="s2-h">
+    <div class="page-head">
+      <h2 id="s2-h">Configure &amp; review the resolved logic</h2>
+      <p>Read out of the SOW's free-text Validations prose. Edit anything that looks wrong — your edits are what gets generated.</p>
+    </div>
+
+    <div class="panel">
+      <div class="excel-view-hdr">
+        <h2>Input A — Excel view <span class="muted">(reference)</span> <span class="muted excel-view-summary-text"></span></h2>
+        <button class="btn btn-s" onclick="toggleExcelView(this)">Show</button>
+      </div>
+      <div class="excel-view-mount excel-view-body hidden"></div>
+    </div>
+
+    <div id="alerts-box" class="alerts-box"></div>
+
+    <div id="value-alias-panel" class="panel hidden"></div>
+
+    <div class="panel">
+      <h2>Resolved conditions review</h2>
+      <p class="panel-hint">Multiple conditions on one field are OR'd together.</p>
+      <div id="popup-text-row" class="popup-text-row"></div>
+      <div id="resolved-panel-body"></div>
+      <div id="resolved-add-row" class="resolved-add-row"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Exclusion groups review</h2>
+      <p class="panel-hint">Combinations a candidate may not select together, and the message shown when they try.</p>
+      <div id="excl-panel-body"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Live preview</h2>
+      <div id="tabs" class="tabs"></div>
+      <div id="panels"></div>
+    </div>
+
+    <div class="action-bar">
+      <span class="action-bar-hint" id="s2-hint"></span>
+      <div class="action-bar-grp">
+        <button class="btn" onclick="goStep(1)">Back</button>
+        <button class="btn btn-accent" onclick="goStep(3)">Generate &amp; Export</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════ STEP 3 — generate & export ══════════════ -->
+  <section class="step-page" id="step-3" aria-labelledby="s3-h">
+    <div class="page-head">
+      <h2 id="s3-h">Copy or download the generated files</h2>
+      <p>Each file is ready to paste into its place in the target project.</p>
+    </div>
+
+    <div class="export-hero">
+      <div class="stats" id="export-stats"></div>
+      <button class="btn btn-primary" id="btn-zip" onclick="downloadAllZip(this)">Download all (.zip)</button>
+    </div>
+
+    <div class="file-grid" id="file-grid"></div>
+
+    <div class="action-bar">
+      <div class="action-bar-grp">
+        <button class="btn" onclick="goStep(2)">Back</button>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<script src="js/core/state.js"></script>
+<script src="js/core/zip.js"></script>
+<script src="js/core/dictionary.js"></script>
+<script src="js/core/types.js"></script>
+<script src="js/core/set2.js"></script>
+<script src="js/core/fieldcodes.js"></script>
+<script src="js/core/fixtures.js"></script>
+<script src="js/parsing/tsv.js"></script>
+<script src="js/parsing/inputB.js"></script>
+<script src="js/parsing/inputA.js"></script>
+<script src="js/resolve/resolver.js"></script>
+<script src="js/resolve/exclusions.js"></script>
+<script src="js/generators/stubs.js"></script>
+<script src="js/generators/config.js"></script>
+<script src="js/generators/config2.js"></script>
+<script src="js/generators/detailsPhp.js"></script>
+<script src="js/generators/detailsPhp2.js"></script>
+<script src="js/generators/detailsJs.js"></script>
+<script src="js/generators/detailsJs2.js"></script>
+<script src="js/generators/submitPhp.js"></script>
+<script src="js/generators/submitPhp2.js"></script>
+<script src="js/generators/validationsPhp.js"></script>
+<script src="js/generators/validationsPhp2.js"></script>
+<script src="js/generators/ajaxPhp.js"></script>
+<script src="js/generators/ajaxPhp2.js"></script>
+<script src="js/generators/functionsPhp.js"></script>
+<script src="js/generators/functionsPhp2.js"></script>
+<script src="js/generators/qryArrays.js"></script>
+<script src="js/generators/langPhp.js"></script>
+<script src="js/generators/queriesSql.js"></script>
+<script src="js/generators/printPhp.js"></script>
+<!-- highlight.js's own root bundle already includes php/javascript/sql (and
+     ~35 others) — the CDN's per-language files under languages/ are only
+     needed for the stripped-down "core" build, which this isn't. Verified by
+     inspecting hljs.listLanguages() after load; loading them separately was
+     redundant, so they aren't vendored. -->
+<script src="vendor/highlightjs/highlight.min.js"></script>
+<script src="js/ui/nav.js"></script>
+<script src="js/ui/ui.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>

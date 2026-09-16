@@ -1,0 +1,17 @@
+# Generated knowledge-graph output (4+ MB, rebuilt by the graphify skill)
+graphify-out/
+
+# Editor / OS
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Scratch output from ad-hoc generator runs (see CLAUDE.md — emitters are
+# sometimes dumped to a file to diff by hand)
+scratch_*
+
+node_modules/
+
+references/
