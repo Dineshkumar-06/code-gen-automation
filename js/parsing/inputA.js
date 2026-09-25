@@ -24,57 +24,26 @@
 
   function isNoteText(s){ return /^note\s*:/i.test(String(s || '').trim()); }
 
-  // Set 2 (PRD §10, deferred) detection — two independent signals, since the
-  // two real Set 2 SOWs seen so far (cwcsep25: 2 dropdowns; a second sample:
-  // 3 dropdowns incl. a nested "Sub-Type of Multiple Disability" multi-select)
-  // do NOT share a dropdown-count structural signature. Both DO share:
-  //
-  //   1. a "Sub-Type of Disability" label (or its "...Multiple Disability"
-  //      variant) — the strong signal, proven on both known samples with
-  //      zero false positives on four known Set 1 samples.
-  //   2. the disability-type-equivalent field's Values cell names its
-  //      category codes INLINE ("HI, VI, LD, ID/MD", "OH, HH, VH") instead of
-  //      deferring to Other Details ("Refer other details", Set 1's phrasing)
-  //      — a corroborating signal for a SOW that might phrase signal 1
-  //      differently than either sample has.
-  //
-  // A structural "count the dropdowns" check was considered and rejected: it
-  // is not actually invariant between the two known Set 2 shapes.
-  var SUBTYPE_LABEL_RE = /sub\s*-?\s*type\s+of\s+(multiple\s+)?disability/i;
-  var DEFERS_TO_OTHER_DETAILS_RE = /other\s+details/i;
-  var INLINE_CODE_LIST_RE = /^(?:values?\s+are\s*)?"?\s*[A-Za-z]{1,6}(?:\s*\/\s*[A-Za-z]{1,6})*\s*(?:,\s*[A-Za-z]{1,6}(?:\s*\/\s*[A-Za-z]{1,6})*\s*){1,}"?\s*$/;
+  // Which dictionary/shape a paste is read against is now always an explicit
+  // developer choice (`layout`, one of 'set1'/'set2'/'set3') rather than
+  // guessed from prose. Per the user (2026-09-17): prose-based auto-detection
+  // could never be made airtight against every future SOW's wording, and
+  // carrying both a guess AND an override (plus the warnings for when they
+  // disagreed) was more complexity than the guess ever bought — simpler for
+  // the developer to just say which layout they're pasting.
+  //   set1 — Disability Category -> Type of Disability (Type doubles as the
+  //          category-E multi-select trigger).
+  //   set2 — Type of Disability holds the CATEGORY; the sub-type question
+  //          splits across subdistypeido (one routing category) and
+  //          sub_disability_type (every other category).
+  //   set3 — same split dictionary as set2, but ONE sub-type dropdown serves
+  //          every category (no subdistypeido routing dropdown).
+  var LAYOUTS = {
+    set1: { isSet2: false, layoutShape: 1 },
+    set2: { isSet2: true, layoutShape: 2 },
+    set3: { isSet2: true, layoutShape: 3 }
+  };
 
-  // Runs on RAW rows, before any dictionary claiming — the layout decides
-  // which dictionary to claim against (Set 2 has three fields Set 1 does not,
-  // and types its "Type of Disability" row differently), so detection may not
-  // depend on claimed postNames. Signal 2 therefore identifies the
-  // type-of-disability row by an unclaimed dictionary lookup rather than by
-  // the claimed control type it used to read.
-  function detectSet2(fields){
-    for (var i = 0; i < fields.length; i++) {
-      if (SUBTYPE_LABEL_RE.test(normLabel(fields[i].label))) {
-        return { isSet2: true, reason: 'sub-type-label', field: fields[i].label };
-      }
-    }
-    var typeField = null;
-    for (var j = 0; j < fields.length; j++) {
-      if (fields[j].isNote || !fields[j].label) continue;
-      var hit = DICT.findByNormalizedLabel(normLabel(fields[j].label));
-      if (hit && hit.postName === 'disability_type') { typeField = fields[j]; break; }
-    }
-    if (typeField && typeField.values && !DEFERS_TO_OTHER_DETAILS_RE.test(typeField.values)
-        && INLINE_CODE_LIST_RE.test(typeField.values.trim())) {
-      return { isSet2: true, reason: 'inline-category-codes', field: typeField.label };
-    }
-    return { isSet2: false };
-  }
-
-  // layoutOverride: undefined/null = auto-detect (default); 'set1' or 'set2'
-  // forces the layout and suppresses the auto-detection warning, since the
-  // developer has made an explicit, informed choice rather than the tool
-  // guessing. See CLAUDE.md "Set 2 detection" — the override exists precisely
-  // because prose-based detection cannot be made airtight against every
-  // future SOW's wording.
   // Pass 1: split the paste into raw field objects and spot the note row.
   // Nothing here consults the dictionary — the layout is not known yet.
   function readRows(raw){
@@ -114,17 +83,38 @@
 
   // Pass 2: claim a dictionary entry per row, against the layout's own
   // dictionary. Mutates the objects from pass 1 in place.
-  function claimFields(fields, layout, warnings){
-    var claim = DICT.makeLabelClaimer(layout);
+  //
+  // overrides: {<row index>: postName | ''} — rows the developer mapped by
+  // hand in step 2's row-mapping panel, for a label no dictionary wording
+  // covers. Applied first so the chosen field is out of the pool before any
+  // other row claims it by label; '' means "do not generate this row".
+  function claimFields(fields, layout, warnings, opts, overrides){
+    var claim = DICT.makeLabelClaimer(layout, opts);
+    overrides = overrides || {};
+    var forced = {};
+    for (var o = 0; o < fields.length; o++) {
+      var key = String(fields[o]._row);
+      if (fields[o].isNote || !Object.prototype.hasOwnProperty.call(overrides, key)) continue;
+      forced[key] = overrides[key] ? claim.reserve(overrides[key]) : null;
+    }
+
     for (var i = 0; i < fields.length; i++) {
       var field = fields[i];
       if (field.isNote) continue;
 
-      var entry = claim(normLabel(field.label));
-      if (!entry) {
+      var rowKey = String(field._row);
+      var isForced = Object.prototype.hasOwnProperty.call(forced, rowKey);
+      var entry = isForced ? forced[rowKey] : claim(normLabel(field.label));
+      field.mappedByHand = isForced;
+      if (!entry && isForced) {
+        field.postName = null;
+        field.langKey = null;
+        field.control = null;
+        field.constant = false;
+      } else if (!entry) {
         warnings.push({ code: 'unmatched-label',
           msg: 'Row ' + (field.slNo || (field._row + 1)) + ': label "' + field.label.slice(0, 70) +
-               '" does not match any dictionary entry — it will not be generated.' });
+               '" matches no known field — pick one under Row mapping, or it will not be generated.' });
         field.postName = null;
         field.langKey = null;
         field.control = null;
@@ -140,73 +130,47 @@
     }
   }
 
-  function parseInputA(raw, layoutOverride){
+  // Which pasted row became each disability dropdown, in paste order. A label
+  // can match the WRONG field with nothing to flag it ("Type of Disability"
+  // is the type in BPCL but the category in other SOWs), so the UI states
+  // this on every parse as a neutral note rather than a warning.
+  var DROPDOWN_ROLES = {
+    1: { disability_category: 'category', disability_type: 'type (+ multi-select)' },
+    2: { disability_type: 'category', subdistypeido: 'sub-type (routing category)',
+         sub_disability_type: 'sub-type', sub_disability_multiple: 'multi-select' }
+  };
+  function dropdownRows(fields, isSet2){
+    var roles = DROPDOWN_ROLES[isSet2 ? 2 : 1], out = [];
+    for (var i = 0; i < fields.length; i++) {
+      var f = fields[i];
+      if (f.postName && roles[f.postName]) {
+        out.push({ slNo: f.slNo || String(f._row + 1), label: f.label, postName: f.postName, role: roles[f.postName] });
+      }
+    }
+    return out;
+  }
+
+  // layout: 'set1' | 'set2' | 'set3', the developer's own explicit choice —
+  // see the LAYOUTS note above. An unrecognized/missing value falls back to
+  // Set 1 rather than guessing; the UI's layout selector has no blank option,
+  // so this only matters for a caller that skips choosing entirely.
+  function parseInputA(raw, layout, overrides){
     var warnings = [];
     var read = readRows(raw);
     var fields = read.fields;
 
-    var detected = detectSet2(fields);
-    var isSet2, autoDetected = detected.isSet2;
+    var chosen = LAYOUTS[layout] || LAYOUTS.set1;
 
-    if (layoutOverride === 'set1') {
-      isSet2 = false;
-    } else if (layoutOverride === 'set2') {
-      isSet2 = true;
-    } else {
-      isSet2 = detected.isSet2;
-    }
+    // Set 1 only: "Type of Disability" / "Nature of Disability" naming, where
+    // each label sits one step down from BPCL's. See dictionary.js.
+    var nature = chosen.layoutShape === 1 && DICT.usesNatureNaming(
+      fields.filter(function(f){ return !f.isNote; }).map(function(f){ return normLabel(f.label); }));
 
-    claimFields(fields, isSet2 ? 2 : 1, warnings);
-
-    // Among the "not Set 1" pastes there are two structurally different
-    // shapes, and only one of them has reference code:
-    //
-    //   SHAPE 2 (uiicljul26) — the sub-type question SPLITS. One category
-    //     routes to its own dropdown ("Sub-Type of Disability for MD/IDs'",
-    //     `subdistypeido`), every other category routes to
-    //     `sub_disability_type`, and picking "Multiple Disabilities" in the
-    //     routing dropdown opens the multi-select.
-    //   SHAPE 3 (fixture set2b) — no routing dropdown at all. ONE sub-type
-    //     dropdown serves every category, with "Multiple Disabilities" sitting
-    //     inside that single list and opening the multi-select from there.
-    //
-    // Flagged separately at the user's request (2026-09-11) so it is not
-    // silently treated as the same thing; Set 3 support proper is deferred.
-    // Generation still runs — core/set2.js degrades correctly (no routing
-    // split, the plain sub-type dropdown becomes the multi-select's trigger)
-    // and the output is well formed, but nothing has verified it against real
-    // reference code, which is what the warning says.
-    var layoutShape = 1;
-    if (isSet2) {
-      var hasRoutingDropdown = false;
-      for (var s3 = 0; s3 < fields.length; s3++) {
-        if (fields[s3].postName === 'subdistypeido') { hasRoutingDropdown = true; break; }
-      }
-      layoutShape = hasRoutingDropdown ? 2 : 3;
-    }
-
-    if (isSet2 && !layoutOverride) {
-      var why = detected.reason === 'sub-type-label'
-        ? 'found a "' + detected.field + '" field'
-        : 'the "' + detected.field + '" field names its categories inline instead of deferring to Other Details';
-      if (layoutShape === 2) {
-        warnings.push({ code: 'set2-layout',
-          msg: 'Set 2 layout detected (' + why + '): "Type of Disability" holds the category. ' +
-               'Use the layout selector if this is wrong.' });
-      } else {
-        warnings.push({ code: 'set3-layout',
-          msg: 'Third layout detected (' + why + ', but one sub-type dropdown serves every category). ' +
-               'Generated as a best effort — no reference code exists for this shape, so review every file.' });
-      }
-    }
-    if (isSet2 && layoutOverride === 'set2' && !autoDetected) {
-      warnings.push({ code: 'set2-forced',
-        msg: 'Set 2 forced by the layout selector — auto-detection did not read this paste as Set 2.' });
-    }
+    claimFields(fields, chosen.layoutShape, warnings, { nature: nature }, overrides);
 
     return { fields: fields, noteText: read.noteText, warnings: warnings,
-             isSet2: isSet2, layoutShape: layoutShape,
-             autoDetectedSet2: autoDetected, set2Reason: detected.reason };
+             isSet2: chosen.isSet2, layoutShape: chosen.layoutShape, natureNaming: nature,
+             dropdownRows: dropdownRows(fields, chosen.isSet2) };
   }
 
   App.parseInputA = parseInputA;

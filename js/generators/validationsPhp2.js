@@ -106,6 +106,11 @@
       for (var i = 0; i < fields.length; i++) if (fields[i].postName === postName) return true;
       return false;
     }
+    // The sub-type dropdown's LANG key differs by layout (Set 2
+    // reg_sub_disability, Set 3 reg_sub_disability_type — each reference's
+    // own), so it is read off the claimed field, never written in literally.
+    var subKey = 'reg_sub_disability';
+    for (var sk = 0; sk < fields.length; sk++) if (fields[sk].postName === 'sub_disability_type') subKey = fields[sk].langKey || subKey;
     function maxLen(postName, dflt){
       for (var i = 0; i < fields.length; i++) {
         if (fields[i].postName === postName) {
@@ -116,10 +121,19 @@
       return dflt;
     }
 
+    var mulCode = roles.multipleCode || '';
     var rootY = has('optdisability') ? "$_POST['optdisability'] == 'Y'" : null;
     function withRoot(g){
       if (!g) return rootY;
       if (!rootY) return g;
+      // A guard that IS the root toggle already needs no second copy of it:
+      // licjamar26 gates its cerebral-palsy and dominant-hand questions on
+      // the root toggle alone, which came out as
+      // "$_POST['optdisability'] == 'Y' && $_POST['optdisability'] == 'Y'".
+      // Only the exact-match case is skipped -- an OR guard that merely
+      // MENTIONS the root toggle still gets the conjunct, which is the
+      // documented structural narrowing and is relied on by Set 2's output.
+      if (g === rootY) return g;
       return g + ' && ' + rootY;
     }
 
@@ -167,11 +181,11 @@
         'if (' + (withRoot(subGuard) || 'true') + ') {\n' +
         "\t$arrDisTypeEdit = explode(\",\", $arr_subDisability_map_Edit[$_POST['disability_type']]);\n" +
         "\tif (trim($_POST['sub_disability_type']) == '') {\n" +
-        '\t\t$errmsg .= "Please Select ".$LANG[\'reg_sub_disability\']." <br /><br />";\n' +
-        "\t\t$errmsgarr[] = 'sub_disability_type|Please Select '.$LANG['reg_sub_disability'];\n" +
+        '\t\t$errmsg .= "Please Select ".$LANG[\'' + subKey + '\']." <br /><br />";\n' +
+        "\t\t$errmsgarr[] = 'sub_disability_type|Please Select '.$LANG['" + subKey + "'];\n" +
         "\t} elseif (!in_array($_POST['sub_disability_type'], $arrDisTypeEdit, true)) {\n" +
-        '\t\t$errmsg .= $LANG[\'reg_sub_disability\']." is invalid <br /><br />";\n' +
-        "\t\t$errmsgarr[] = 'sub_disability_type|'.$LANG['reg_sub_disability'].' is invalid|C';\n" +
+        '\t\t$errmsg .= $LANG[\'' + subKey + '\']." is invalid <br /><br />";\n' +
+        "\t\t$errmsgarr[] = 'sub_disability_type|'.$LANG['" + subKey + "'].' is invalid|C';\n" +
         '\t} else {\n' +
         "\t\t$errmsgarr[] = 'sub_disability_type|';\n" +
         '\t}\n' +
@@ -199,7 +213,15 @@
         "\t\t$_POST['" + MULTI + "'] = array_unique($_POST['" + MULTI + "']);\n" +
         '\t\t$disablCnt = 0; $disablCntBad = 0;\n' +
         "\t\tforeach ($_POST['" + MULTI + "'] as $key) {\n" +
-        '\t\t\tif (array_key_exists($key, $arr_mulsubDisabilityType2)) { $disablCnt++; } else { $disablCntBad++; }\n' +
+        // $arr_mulsubDisabilityType2 lists every sub-type INCLUDING the
+        // "Multiple Disabilities" entry that opens this list, because
+        // ajax_getSubType_Multiple_disability.php looks names up in it. That
+        // entry is never offered as an option here, so posting it means the
+        // request was tampered with -- rejected explicitly, as the reference
+        // does, rather than relying on it not being in the rendered list.
+        '\t\t\tif (array_key_exists($key, $arr_mulsubDisabilityType2)' +
+        (mulCode ? " && $key != '" + mulCode + "'" : '') +
+        ') { $disablCnt++; } else { $disablCntBad++; }\n' +
         '\t\t}\n\n' +
         '\t\tif ($disablCntBad > 0) {\n' +
         '\t\t\t$errmsg .= $LANG[\'reg_' + MULTI + '\']." is Invalid";\n' +
@@ -256,8 +278,23 @@
       return s;
     }
     function domBody(indent){
-      return indent + "$mandatory_flds['compensatary_time'] = 'reg_compensatary_time|radiobutton|1|compensatary_time';\n" +
-             indent + "$validate_flds_value['compensatary_time'] = 'reg_compensatary_time|Should be either Yes or No|Y,N|C';\n";
+      var s = indent + "$mandatory_flds['compensatary_time'] = 'reg_compensatary_time|radiobutton|1|compensatary_time';\n";
+      var c = resolved.compensatary_time && resolved.compensatary_time.constraint;
+      if (c && c.code) {
+        var tests = ["$_POST['" + c.whenField + "'] == '" + c.code + "'"];
+        if (has(MULTI)) {
+          tests.push("(is_array($_POST['" + MULTI + "']) && in_array(\"" + c.code + '",$_POST[\'' + MULTI + "'],true))");
+        }
+        s += indent + 'if (' + tests.join(' || ') + ') {\n' +
+             indent + "\t$validate_flds_value['compensatary_time'] = 'reg_compensatary_time|Should be " +
+               (c.shouldBe === 'Y' ? 'Yes' : 'No') + '|' + c.shouldBe + "|C';\n" +
+             indent + '} else {\n' +
+             indent + "\t$validate_flds_value['compensatary_time'] = 'reg_compensatary_time|Should be either Yes or No|Y,N|C';\n" +
+             indent + '}\n';
+      } else {
+        s += indent + "$validate_flds_value['compensatary_time'] = 'reg_compensatary_time|Should be either Yes or No|Y,N|C';\n";
+      }
+      return s;
     }
 
     if (shared) {

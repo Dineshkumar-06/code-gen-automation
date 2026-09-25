@@ -29,6 +29,12 @@
       // reaches every field's condition scan, not just the row that warned.
       manualAliases: {},
 
+      // Rows the developer re-pointed in step 2's Row mapping panel
+      // ({<paste row index>: postName | ''}), for a label no dictionary
+      // wording covers. Like manualAliases, an INPUT: re-applied on every
+      // re-read of the same paste, cleared only by a new paste/sample/layout.
+      fieldOverrides: {},
+
       warnings: [],              // [{code, msg}]
 
       // Which disability layout the current parse is: 1 or 2 (PRD §10).

@@ -1,5 +1,666 @@
 # Disability Section Code Generator
 
+## Set 1 "Type / Nature of Disability" naming, and Row mapping (2026-09-25)
+
+**Reported by the user** with a real Set 1 SOW (now fixture `nature`,
+"Type/Nature of Disability naming (Set 1)"; the SOW's own name was not
+given). Structurally it is Set 1 — category a-e, category e opening the
+multi-select — but each dropdown's label sits one step down from BPCL's:
+
+| BPCL | this SOW | field |
+|---|---|---|
+| Disability Category | Type of Disability | `disability_category` |
+| Type of Disability | Nature of Disability | `disability_type` |
+
+Read literally, "Type of Disability" claimed `disability_type`, "Nature of
+Disability" matched nothing, Input B swallowed its own header row as a
+category (neither header says "category"), every code shifted by one, and
+"point no. 6" references could not resolve.
+
+### The automatic fix
+
+- **`js/core/dictionary.js`: `ENTRIES1_NATURE`**, a copy of Set 1's table
+  with those two entries relabelled. Used ONLY when `usesNatureNaming()`
+  holds: some row says "Nature of Disability" and none says "Disability
+  Category". A lone "Type of Disability" still means BPCL's type — that is
+  how every other Set 1 fixture reads, and a Set 2 cell mentioning "Nature of
+  Disability" in prose never switches it on (Set 1 only, and it is keyed on
+  LABELS). `parseA.natureNaming` records it, and the "Dropdowns read as"
+  note (below) says how the paste was read.
+- **`js/parsing/inputB.js`**: `SUB_HDR_RE` also accepts `nature\s*of`. The
+  "Nature of" column is the narrower one exactly as a "Sub-" column is, so it
+  takes the same pass that fixed Set 2's header (2026-09-11).
+
+### Four smaller fixes the same paste exposed (none Nature-specific)
+
+1. **Unclosed popup quote.** The row reads `...displayed to candidates
+   "Please select 'Yes' ... in the exam.` and the cell ends. With no quoted
+   span after the lead-in, `extractPopupText()` fell back to the longest
+   quoted span ANYWHERE — the quoted root-toggle label. `findPopupSpan()` now
+   takes everything after the opening quote in that case (`popup-unterminated`
+   warning), and `extractPopupText()` uses it whenever a lead-in exists.
+2. **Popup stated on the category row.** Set 1 looked for the popup only on
+   the type row; this SOW states it on "Type of Disability", which is the
+   category here. If the type row has no popup lead-in and the category row
+   does, the category row is used (and `extractFieldPopups` skips whichever
+   row that is). The generated `alert()` still fires where Set 1's template
+   fires it (type / multi-select selection) — not changed.
+3. **Root toggle got a condition.** "If this point is selected as Yes then
+   point 5 to 13 should be enabled" on `optdisability` resolved to a
+   condition ON the root naming point 5 — a nonsense review card (uiicl's row
+   4 says the same). `optdisability` is never resolved; it gates, it is not
+   gated. No emitter read it.
+4. **"Mandatorily Yes if ..."** is the should-be-Yes constraint worded
+   differently: `SHOULD_BE_Y_RE` accepts `should be` / `must be` /
+   `mandatorily`. Two follow-ons: the constraint's value and reference are
+   now read only AFTER the phrase — the sentence here is `In point 4
+   Mandatorily Yes if "Cerebral Pasy" is selected in point no. 6`, and "point
+   4" (the tail of the previous clause) was winning as the earliest
+   reference; and a quoted value that does not resolve (`Cerebral Pasy`, a
+   typo) now raises `value-name-unmatched` with `abbrev`, so the existing
+   value-alias panel offers it. Assigning it yields `disability_type includes
+   <Cerebral Palsy>`. Per the no-guessing rule, typos are surfaced, not
+   fuzzy-matched.
+
+### Row mapping — the general answer
+
+Auto-detection only covers namings already seen. The dictionary's
+exact-label + keyword-signature match handles paraphrases, but a SOW can
+always name a field in a way no signature anticipates. Step 2 now has a
+**Row mapping** panel (`renderRowMapPanel()` in `ui.js`): every pasted row,
+its Sl No and label, and a dropdown of the layout's dictionary entries (plus
+"— not generated —"). It is collapsed unless something needs a look (an
+unmatched row, or one already set by hand); the `unmatched-label` warning now
+points at it.
+
+- **An override is an input to parsing, not a patch on its output.**
+  `S.fieldOverrides` (`{<paste row index>: postName | ''}`) is passed to
+  `parseInputA(raw, layout, overrides)`, and `claimFields()` applies it
+  before label claiming via the claimer's new `reserve()`. So every consumer
+  — resolver, point references, every emitter — sees the chosen field. A
+  field chosen by hand is out of the pool, so the row that would have claimed
+  it by label shows as unmatched rather than two rows sharing one field.
+- Same lifecycle as `manualAliases`: re-applied on every re-read of the
+  same paste, cleared by `resetState()` on a new paste / sample / layout.
+- **Changing a row re-reads the paste** (`rereadRows()`) and drops step-2
+  edits to conditions / popup / exclusions, since those are keyed by field
+  and the fields just changed. Aliases and overrides survive. The panel's
+  hint says so.
+
+### Unfamiliar wording elsewhere — three silent failures closed
+
+The user asked what happens when labels differ in ways not seen yet. Three
+places failed WITHOUT a warning; each now either resolves or says so.
+
+1. **Quoted references looked only at the dictionary.** `selected yes for
+   "<label>"` was resolved by `DICT.findByNormalizedLabel()` alone, so a
+   quote of a row's own non-standard wording — even one fixed in Row mapping
+   — dropped the condition with no trace. `resolveQuotedLabel(text, ctx,
+   self)` now tries this paste's own rows first (exact normalized label, or
+   a 12+ char prefix either way, since SOWs quote labels shortened), then
+   the dictionary and `LABEL_ALIASES`. A quote with a yes/no cue and no
+   point reference that still resolves to nothing, and reads as a question
+   (3+ words, no type/category name in it), raises
+   `quoted-label-unresolved`. Checked against every fixture: the paste-first
+   lookup never picks a different field than the dictionary did, and no
+   fixture raises the new warning. Also: a dictionary hit naming the row
+   being resolved is discarded — keyword signatures fire on quoted VALUES
+   (`"Cerebral palsy"` matches `disabilitysuffersoc`'s own signature), and a
+   field is never enabled by itself. No fixture hit this; it is a guard.
+2. **Unknown Other Details headers were swallowed as data.** With no header
+   recognised, the shape fallback had no row to skip: `Group | Disability
+   Name` became category "Group" and type "Disability Name", every code off
+   by one, zero warnings. `guessHeaderRow()` now runs only on that fallback:
+   a first-row category cell matching `HEADERISH_RE` (categor / type / group
+   / class / disabilit / nature / kind / name / S.No) — words no real
+   category label in any sample contains — is skipped as the header
+   (`inputb-header-guessed`); otherwise `inputb-no-header` names the first
+   row and says to delete it if it is a header. Every fixture's header is
+   still recognised the old way and raises neither.
+3. **A wrong match was invisible.** "Type of Disability" matching the wrong
+   field raised nothing. `parseInputA` now returns `dropdownRows` (which row
+   became category / type / sub-type / multi-select, per layout), and the UI
+   states it as a neutral one-line note on the step-1 receipt and above the
+   step-2 warnings — deliberately NOT a warning, since it is there on every
+   parse and would otherwise turn every clean parse yellow. It replaces the
+   `nature-naming` warning, which it subsumes ("(Type / Nature of Disability
+   naming)" is appended when that reading was used).
+
+### LANG key divergence — settled
+
+`references/set 2 references.txt` IS on disk (TREE.md said otherwise) and
+uses `reg_sub_disability`; `set 3 code reference.md` uses
+`reg_sub_disability_type`. Both right for their own layout. `ENTRIES3` is
+`ENTRIES2` with that one key changed, `parseInputA` claims against 1/2/3 by
+`layoutShape`, and `detailsPhp2.js` / `validationsPhp2.js` / `printPhp.js`
+read the key off the claimed field instead of writing it literally.
+
+### Verified
+
+`test/run_nature.js` (68) is new; `run_set3_generators.js` +8 (the key in all
+four files, and no Set 2 key). Node suite: 18 files, **730 assertions**.
+Every existing fixture parses and resolves as before. In Chrome from
+`file://`: the `nature` sample reads rows 5/6 correctly with 0 unmatched,
+Input B gives five categories / 17 types, the popup is the real message,
+"Cerebral Pasy" appears in the alias panel and assigning it adds the
+constraint; re-pointing a row, the "Auto" reset, and alias survival across a
+re-read all work; the panel stays collapsed for every sample except `cwc`,
+which opens it for its three known unmodelled rows. No console errors from
+app code.
+
+## Step-3 form simulator, removed (2026-09-25)
+
+A step-3 form simulator existed briefly (added 2026-09-18): it interpreted
+the generated `config.php`/`reg_details_lang.php`/`functions.php`/
+`reg_details.php` and the ajax endpoints with a hand-written PHP evaluator
+(`js/sim/php.js`), ran `reg_details.js` verbatim on vendored jQuery
+(`js/sim/simulator.js`, `vendor/jquery/`), and painted validation results
+into the rendered markup — all to let a developer exercise the generated
+code in-browser before pasting it into a real project.
+
+**Removed at the user's request.** Per the user's own weighing of it: it was
+a second implementation to maintain (a PHP interpreter, a fake XHR, and this
+tool's own reading of `reg_validations.php`'s declare-rules-not-validate
+contract), any emitter change that outgrew the PHP evaluator's modeled
+subset would break the simulator even when the generated code was fine, and
+the validation half was never faithful to begin with — the host
+application's own framework owns how validation actually runs and what the
+messages say, so the simulator could only approximate that. Pasting the
+output into a real dev copy of the host app tests the real thing (the real
+framework, database, jQuery version) rather than a stand-in for it, and the
+Node suite already covers structure/gating/codes plus a real `new
+Function()` parse of every generated `reg_details.js`.
+
+**What was removed**: `js/sim/` (`php.js`, `simulator.js`), `vendor/jquery/`,
+`test/run_simulator.js`, the `#sim-panel` section and its two `<script>` tags
+in `index.html`, the `sim*` functions in `js/ui/ui.js` (`simMount`/
+`toggleSim`/`simValidate`/`simReset`/`simInvalidate` and their `window.*`
+exports), the `js/sim/php.js` entry in `test/harness.js`'s file list, and the
+`.sim-*` CSS block in `css/styles.css`. `vendor/highlightjs/` is unrelated
+and was not touched. Node suite: 17 files, **645 assertions** (was 18 / 732
+with `run_simulator.js`'s 87).
+
+If browser-level exercise of the generated code is wanted again later, a
+lighter-weight guard was suggested instead of rebuilding this: `php -l` on
+the generated PHP files, plus the existing `new Function()` JS-parse check
+the generator tests already do.
+
+## Input B: several sub-types on one line (2026-09-18)
+
+**Reported by the user against cwcsep25's own Other Details**, which writes a
+whole group in a single cell:
+
+    Category   Sub-Category
+    OH         OL, OA, ADV, MDY, DR
+    HH         HH
+    VH         LV
+
+Every other sample gives each sub-type its own row with a blank category cell
+(the continuation shape `parseInputB` was built around), so that cell was read
+literally as ONE disability **named** `"OL, OA, ADV, MDY, DR"`. cwc came out
+with 3 sub-types where it has 7; `$arr_subDisabilityType2` offered that whole
+string as a single dropdown option, `$arr_subDisability_map_Edit['01']` mapped
+OH to one code instead of five, and no validation sentence naming OL or OA
+could ever match, because no such value existed to match against.
+
+**Fix**: `splitTypeCell()` in `js/parsing/inputB.js` splits a sub-type cell on
+`,` and `;` before the existing dedupe-and-code-assign loop runs, so each name
+gets its own code and all of them land in the open category's mapping. Nothing
+else changed — column detection, the repeated-category reopen, and the
+normalized dedupe all work on the split names exactly as they did on whole
+cells.
+
+**`/` is deliberately NOT a separator here**, which is the opposite of how
+validation PROSE is read (`core/types.js` scans prose where `/` genuinely does
+separate names). The difference is that prose is free text and a table cell is
+not: `MD/ID` and `ID/MD` are single CATEGORY labels in two of the real pastes,
+and a sub-type may be spelled the same way, so splitting on `/` would shred
+real names. The delimiters chosen are the ones no real name in any sample
+contains — checked across all seven pastes, the only cell holding a comma or a
+semicolon is this one. `;` has not been seen in a real SOW; it is included
+because a table cell is a list either way and no name in any sample contains
+one.
+
+**A split is reported** (`inputb-type-list-split`, informational) naming the
+cells it split, deduped — cwcsep25 lists its whole table twice, and naming the
+same cell twice reads like two separate problems. The warning exists because
+this is the one place a genuine name containing a comma would be silently torn
+in two, and it surfaces right next to the value lists it produced.
+
+cwc now parses to 7 sub-types with `OH => 01,02,03,04,05`. Its resolved
+conditions are unchanged — they name the CATEGORY `VH` and the point-number
+glosses, not these sub-types — so this is purely a data fix, but it is the
+difference between a usable generated dropdown and a nonsense one. Verified in
+Chrome: the review panel's sub-type value list now offers seven entries, the
+warning renders on step 2, and Set 1 / Set 2 / Set 3 sample type counts are
+unchanged (20 / 22 / 18). `test/run_inputB.js` grew from 11 to 33 assertions —
+the comma form, the semicolon form, two slash cases that must NOT split, a
+sweep asserting the six one-per-row pastes are untouched and report nothing,
+and the deduped-warning case. Node suite: 17 files, **645 assertions**.
+
+## Set 3 verified against reference code (2026-09-18)
+
+Set 3 had been "supported but unverified" since 2026-09-11 — flagged as its
+own layout shape at the user's request, with no reference code to check the
+output against. That reference arrived as `set 3 code reference.md`
+(licjamar26), covering every output file plus the two ajax endpoints already
+sitting in the repo root.
+
+**The `set2b` fixture IS licjamar26.** Its Input A and Input B are
+byte-identical to the reference document's own Basic-details and
+Other-details pastes, so no new fixture was needed — the paste this tool has
+been shipping since 2026-09-11 turned out to be the one the reference
+describes. Its display name is now "licjamar26 (Set 3 reference)"; the
+fixture KEY stays `set2b` (renaming churns every test and the sample
+picker's saved value for no gain — same call as when it was reclassified as
+shape 3).
+
+`test/run_set3_generators.js` is new (65 assertions) and is the acceptance
+basis, on the same footing as Set 2's: not a byte-diff (the reference's own
+config.php numbers codes from the reference application's historical master
+table, not from the paste — user's call 2026-09-11), but the STRUCTURE the
+reference states, with this paste's own codes resolved through
+`core/set2.js` rather than written in literally. Node suite: 17 files,
+**623 assertions** (was 16 / 558). Set 1 and Set 2 output is unchanged
+throughout except where noted below as a shared fix.
+
+### The resolver bugs the reference exposed — none of them Set-3-specific
+
+1. **The popup message leaked into enablement.** `stripNoiseSpans()` located
+   the popup by taking the lead-in plus the FIRST quoted span after it. That
+   holds only while nothing else in the lead-in is quoted. licjamar26 writes
+
+       A popup message should be displayed to VI, HI, LD, "ID/MD" candidates
+       "Please select 'Yes', if you are VI, LD(cerebral palsy /dominant
+       hand), HI (cerebral palsy /dominant hand), ID/MD eligible for ..."
+
+   — one of the categories the popup is FOR is itself quoted, ahead of the
+   message. So the strip consumed `"ID/MD"` and left the real message in the
+   text, where `scanTypeNames` duly found "cerebral palsy" and resolved the
+   CATEGORY dropdown to `optdisability == 'Y' OR sub_disability_type in [10]
+   OR sub_disability_multiple in [10]`. The reference's own condition is a
+   plain `$row_reg['disability'] != 'Y'`.
+
+   Fixed by `findPopupSpan()`, which locates the message as the LONGEST
+   quoted span at or after the lead-in — the same rule `extractPopupText()`
+   already uses to decide what the message IS, so the two can no longer
+   disagree about where it ends.
+
+2. **`popupCategories` dropped a quoted category** for exactly the same
+   reason: it scanned the lead-in only as far as the first quote, so
+   licjamar26's `ID/MD` was lost and the alert fired for three of its four
+   categories. It now scans from the lead-in to where the MESSAGE starts.
+
+3. **A constraint sentence naming several rows picked the wrong one.**
+   `extractShouldBeConstraint()` tried `POINT_REF_RE` first and only fell
+   back to `BARE_REF_RE`, so in
+
+       Should be YES if "Cerebral palsy" is selected in 5 or Point no 6
+
+   the `point`-spelled reference won and the constraint hung off row 6, the
+   MULTI-SELECT — which the emitter then compared with a scalar `==`. The
+   earliest reference that names a real row now wins, giving
+   `sub_disability_type includes '<Cerebral palsy>'`; the emitter adds the
+   `in_array()` arm for the multi-select itself, reproducing the reference's
+   own `$_POST['sub_disability_type'] == '10' || (is_array(...) &&
+   in_array("10", ...))` exactly. A candidate number that names no row in
+   this paste is skipped rather than warned about, so `... in 40% ...`
+   cannot be mistaken for a reference.
+
+4. **A discarded exclusion cluster never reached the alias panel.**
+   `parseExclusions()` ran its under-2-members discard BEFORE
+   `findUnresolvedAbbrevs()`, so the cluster most in need of manual
+   resolution — the one that resolved to NOTHING — was the one whose members
+   were never offered. licjamar26 writes its third rule as
+   `only one disability from LD (OA/OL/BA/BL/OAL)`, bare initialisms its own
+   Other Details never spells out. Per the user (2026-09-18) the tool does
+   NOT guess initialisms; it surfaces them and the developer assigns them in
+   the existing value-alias panel. So the scan now runs first, and all five
+   names appear there. Verified in Chrome: assigning them yields the
+   reference's own three groups — `$exclgrp1 = array('05','06','07','08',
+   '09')`, `$exclgrp2 = array('03','04')`, `$exclgrp3 = array('01','02')` —
+   and zero warnings.
+
+   Two smaller cluster fixes alongside it: a numbered rule list wins over
+   prose that merely DESCRIBES the rule in the same words (licjamar26
+   explains "a candidate can select only one sub-type from LD and only one
+   sub-type from VI and so on" one line above the list that states them,
+   which was becoming a phantom fourth cluster), and a PARENT CATEGORY named
+   in a cluster is no longer reported as an unresolvable member — "LD" there
+   is the grouping, never a member of it, and assigning it in the alias panel
+   would be actively wrong. `parseExclusions()` takes an optional 4th
+   argument, `categoryIndex`, for that last one.
+
+### Emitters
+
+**`config.php`** — shape 3's `$arr_MulsubDisability_map_Edit` was keyed on
+EVERY sub-type, seventeen of them mapping to `''`, because the shape's single
+sub-type dropdown holds them all. Only the "Multiple Disabilities" key can
+ever open the multi-select and the ajax endpoint treats a missing key and an
+empty one identically, so shape 3 now emits that one key — which is also
+exactly what the reference's config.php contains. Shape 2 keeps its full key
+list (there the keys are the routing category's own sub-types, a short and
+meaningful set).
+
+**Per the user (2026-09-18), the reference's own self-inclusion is NOT
+reproduced**: it maps `'25'` to a list containing `'25'`, yet
+`reg_validations.php` below it rejects `25` as a multi-select choice and no
+`<optgroup>` ever shows it. Treated as a copy-paste artefact, same tier as
+the other documented Set 2 divergences. The emitted validation now REJECTS
+that code explicitly rather than relying on it not being in the rendered
+list, since `$arr_mulsubDisabilityType2` has to contain it for the ajax
+endpoint's own name lookup.
+
+**`reg_details.php`** — two changes:
+
+- `$disabilitymulti = explode(...)` is hoisted to the top of the section. It
+  sat just below the multi-select's own markup, which was safe only while no
+  field ABOVE that row tested the multi-select — and the pre-fix parse of
+  this very SOW produced exactly that (bug 1 above put a
+  `sub_disability_multiple` test on the category dropdown), emitting PHP that
+  read the variable before it existed. `$row_reg` is fully populated from the
+  first line either way, so hoisting removes the hazard outright.
+- **Shape 3 emits its hidden value-mirrors LIVE** —
+  `hidden_benchmarkdisability` (new), `hidden_cerebral_scribe`,
+  `hidden_dominant_scribe`. Set 1's reference wraps its two in a PHP block
+  comment and that was reproduced deliberately (2026-09-04, "match the
+  reference exactly"); Set 3's reference emits all three live AND its
+  `reg_details.js` writes to two of them, so leaving them commented there
+  would point generated JS at elements that do not exist. Same rule, opposite
+  answer, because the two references genuinely differ. Shape 2 keeps whatever
+  its own verified output had.
+
+Not changed, deliberately: the reference ANDs a redundant
+`$row_reg['disability'] == 'Y'` onto `sub_disability_type`'s and
+`sub_disability_multiple`'s `disabled` tests. It is the same redundancy
+documented as Set 2 divergence #3 — `reg_submit.php` NULLs every dependent
+column when the root toggle is not Y, so the inner test can never pass on a
+re-render.
+
+**`reg_details.js`** — the biggest gap, and the one that mattered most:
+
+- **Shape 3 generated nothing that could open its own multi-select.** The
+  handler that does it was gated on `has('subdistypeido')`, a field shape 3
+  does not have, so the one flow the layout is built around was simply
+  absent. It is now driven by `roles.multiTriggerField`, so `#subdistypeido`
+  (shape 2) and `#sub_disability_type` (shape 3) each get it, and
+  `compans_time`'s codes are read off that same trigger field rather than a
+  hardcoded `subdistypeido`. Its else-branch resets the cerebral-palsy /
+  dominant-hand pair only when that pair actually hangs off the multi-select
+  (it does in shape 2; in shape 3 it is gated on the root toggle, and
+  resetting it there would switch off a question the SOW says is on).
+- **The category dropdown now clears the multi-select** when there is no
+  routing dropdown to do it on the way past — its options were fetched for
+  the old category and none of them can still be valid.
+- **`.optdisability`'s Y branch now enables what the root toggle alone
+  enables**, computed from `resolved{}` by `rootYFields()` rather than
+  listed. Two bugs fell out. For licjamar26 the cerebral-palsy and
+  dominant-hand questions are gated on the root toggle and nothing else, so
+  the handler reset them and nothing ever turned them back on. And
+  **`#disability_type` was never enabled by any generated JS in EITHER
+  layout** — `reg_details.php` renders it `disabled` while the stored answer
+  is not Y, so answering Y on the page left the category dropdown stuck that
+  way until a reload. The sub-type dropdowns are excluded from this
+  (`PARENT_OPENED`): each is populated by its own parent's change handler and
+  the root toggle has just cleared that parent, so enabling them would show
+  an empty list — the same structural fact `detailsPhp2.js`'s
+  `structuralGuard` encodes on the PHP side.
+- **`getSub_TypeMuldisability()` builds `<optgroup>`s**, generated from
+  `parseB.categories`/`mapping` exactly as `functionsPhp2.js`'s
+  `PrintArrSub_disDetails()` already does for the first render. Previously
+  the ajax refetch replaced the grouped list with a flat one — the same list
+  rendered two different ways in one page. Shape 2 gets this too. A category
+  left with no offered codes is skipped rather than emitted as an empty
+  group, and a paste where nothing groups falls back to the flat list.
+- The live hidden mirrors are blanked wherever the answers they mirror are
+  reset (shape 3 only — there is nothing to blank when they are commented
+  out).
+
+**`reg_validations.php` / `reg_submit.php`** — `withRoot()` appended
+`&& $_POST['optdisability'] == 'Y'` even when the guard it was given already
+WAS that expression, so the two root-gated Set 3 questions came out as
+`X == 'Y' && X == 'Y'`. Only the exact-match case is skipped; an OR guard
+that merely MENTIONS the root toggle still gets the conjunct, which is the
+documented structural narrowing Set 2's own output relies on.
+
+**`print.php` / `reg_qry_arrays.php` / `disability_queries` /
+`reg_details_lang.php`** needed no change — all four already matched the
+reference structurally, which is what the reference itself asks for ("the
+rules are same as the set 1 and set 2"). Worth recording: `disability_queries`
+emits each column's own pasted Max Length (`sub_disability_type VARCHAR(25)`)
+where the reference writes a uniform `VARCHAR(50)`, per the documented
+2026-09-09 rule that the SOW's own Max Length is what ships; and it emits no
+`AFTER <column>` clause, since neither Set 1 nor Set 2 does.
+
+### Known divergence — SETTLED 2026-09-25
+
+**Resolved**: the Set 2 reference was on disk after all
+(`references/set 2 references.txt`) and says `reg_sub_disability`, so both
+references are right for their own layout. Set 3 now emits
+`reg_sub_disability_type` and Set 2 keeps `reg_sub_disability` — see
+"Set 1 Type/Nature of Disability naming" at the top of this file. The
+original note follows.
+
+The reference names the sub-type dropdown's LANG key
+`reg_sub_disability_type` in four files (`reg_details.php`,
+`reg_validations.php`, `print.php`, `reg_details_lang.php`); this tool's
+dictionary calls it `reg_sub_disability` and emits that consistently across
+all of them. Functionally it makes no difference — the key is only ever read
+by files this tool generates together — so it was NOT changed, because
+`ENTRIES2` is shared by shapes 2 and 3 and the Set 2 reference document is no
+longer in the repo (it was never committed), leaving no way to confirm that
+Set 2's own key would still match its reference afterwards. Raise it with the
+user before changing.
+
+## compensatary_time's own Should-be-Yes constraint (2026-09-17)
+
+**Bug, reported by the user against a real Set 2/3 SOW**: a row read
+"...Should select Yes or No & Should be YES if 'Cerebral palsy' is selected in
+7.2" — the same shape as `disabilitysuffersoc`'s own constraint clause — but
+the generated `reg_validations.php` emitted the plain
+`Should be either Yes or No` check unconditionally, dropping the "should be
+Yes if Cerebral palsy" branch entirely.
+
+**Root cause was in the emitters, not the resolver.** `resolveField()`
+(`js/resolve/resolver.js`) already runs `extractShouldBeConstraint()` against
+every field's own Validations text regardless of which field it is —
+`resolved.compensatary_time.constraint` was already being computed correctly.
+Both `validationsPhp.js` (Set 1) and `validationsPhp2.js` (Set 2/3) already
+had a `disabilitysuffersoc`-specific block (`disabilitySuffersocBlock()` /
+`socBody()`) that reads `resolved.disabilitysuffersoc.constraint` and emits
+the conditional check — but the sibling `compensatary_time` block in each
+file was hardcoded to the plain Yes/No validation, never consulting
+`resolved.compensatary_time.constraint` at all. Not caught by any existing
+fixture because none of bpcl/iifcl/nitr/csmc/uiicl/set2b/cwc's own
+`compensatary_time` rows happen to carry a "should be Yes if X" clause of
+their own — BPCL's own such clause lives on the `disabilitysuffersoc` row
+instead, and nothing had exercised the same shape on this specific field.
+
+**Fix, in both files**: added `compensataryTimeBlock()` (Set 1) and rewrote
+`domBody()` (Set 2/3) to mirror the existing `disabilitysuffersoc` handling
+exactly — check `resolved.compensatary_time.constraint`, and if present, emit
+the same `if($_POST['<whenField>'] == '<code>' || (is_array($_POST[multi])
+&& in_array(...)))` conditional before falling back to the plain Yes/No
+validation.
+
+Verified with a synthetic case reproducing the user's exact wording (both
+against a Set 1 fixture and the Set 2 `uiicl` fixture with a modified
+`compensatary_time` validations cell): `resolved.compensatary_time.constraint`
+resolves correctly, and the generated `reg_validations.php` now contains the
+conditional check in both layouts. 2 new assertions in `test/run_generators.js`
+(Set 1) and 3 in `test/run_set2_generators.js` (Set 2/3).
+
+## Layout selection is explicit, not auto-detected (2026-09-17)
+
+Per the user: auto-detecting Set 1 vs Set 2 vs Set 3 from prose made parsing
+harder to reason about than it needed to be, when the developer pasting a
+SOW already knows which layout it is. The layout selector
+(`#layout-override` in `index.html`) is now a **required** three-way choice
+— Set 1 / Set 2 / Set 3, no "Auto-detect" option — and `parsing/inputA.js`
+no longer contains any detection heuristic at all.
+
+**What was removed**: `detectSet2()` and its three regexes
+(`SUBTYPE_LABEL_RE`, `DEFERS_TO_OTHER_DETAILS_RE`, `INLINE_CODE_LIST_RE`),
+the structural `hasRoutingDropdown` scan that used to pick shape 2 vs 3, and
+the `set2-layout`/`set3-layout`/`set2-forced` warnings that existed only to
+describe when a guess and an override disagreed. `parseInputA(raw, layout)`
+now just looks `layout` up in a fixed `{set1, set2, set3}` table —
+`isSet2`/`layoutShape` are a direct, deterministic consequence of the
+developer's own choice, nothing is inferred from the paste's wording. An
+unrecognized/missing `layout` value falls back to Set 1 rather than
+guessing — in practice this only matters for a caller that skips choosing
+entirely, since the UI selector's only non-forced state is a disabled
+placeholder option.
+
+**`js/core/fixtures.js` gained `FIXTURES.layoutFor(key)`**, returning the
+`'set1'|'set2'|'set3'` string for a sample from its existing `set` field (1/2/3)
+— every test that used to rely on auto-detection picking the right layout for
+a fixture now passes this explicitly instead. This is why `test/run_multi.js`,
+`run_set2_parse.js`, `run_set2_resolve.js`, `run_set2_generators.js` and
+`run_fieldcodes.js` all changed: their old "was this correctly detected as
+Set 2?" assertions became "does explicitly choosing set2/set3 claim fields
+correctly?", and a new pair of assertions in `run_set2_parse.js`/`run_multi.js`
+covers what used to be `set2-forced`'s job — picking the WRONG layout for a
+paste still visibly fails, just as `unmatched-label` warnings on the fields
+that belong to the layout you didn't pick, not a special warning code.
+
+**`js/ui/ui.js`**: `generate()` now requires a non-empty layout selection
+before it will call `parseInputA()` at all — an unselected layout renders a
+receipt on step 1 ("Select a layout (Set 1/2/3) above before parsing.") and
+calls `App.NAV.setParsed(false)`, same "say so, don't look like a dead
+button" rule the empty-paste case already followed. `loadSample()` no longer
+clears the selector to Auto-detect; it prefills it from the sample's own
+known layout (`'set' + sample.set`), since loading a sample already tells you
+which layout it is — no reason to make the developer re-pick it.
+
+Verified: all four Set 1 fixtures still parse cleanly with `set1` explicitly
+chosen; uiicl/set2b/cwc each parse cleanly with their own known layout;
+choosing the wrong layout for a paste (e.g. `set1` for uiicl's paste, or
+`set2` for bpcl's) now surfaces as `unmatched-label` warnings on exactly the
+rows that belong to the layout not chosen. Full suite: 16 files, 558
+assertions (was 563 — several detection-specific assertions were replaced by
+more direct explicit-layout ones rather than 1:1 renamed).
+
+## "Disable for X" exclusions — a resolver gap, not a fixed-template one (2026-09-16)
+
+**Bug, reported by the user against a real SOW**: `compans_time`'s row read
+"Enabled and Mandatory if selected yes for '<root toggle>'. Disable for Low
+Vision" — a base rule plus a named exception — and every one of the four
+files that touch `compans_time` came out wrong: `reg_details.js` and
+`reg_submit.php` both emitted `if(false)`/`(0)`, meaning compans_time could
+never be turned on by any generated code at all.
+
+**Root cause was upstream of every emitter.** "Disable"/"Disabled" contains
+neither "enabled" nor "mandatory", so `resolveEnablement()`'s own sentence
+filter (`ENABLEMENT_RE`) silently dropped the exception sentence before it
+ever reached condition-building — not a wrong answer, a MISSING one.
+`resolved.compans_time.enabledWhen` came out as a plain `optdisability == 'Y'`
+gate, with the exclusion nowhere in it. That shape isn't wrong on its own,
+but `compans_time`'s FOUR dedicated consumers — `compansCodes()`, duplicated
+in `detailsJs.js`/`validationsPhp.js`/`submitPhp.js` — only ever look for an
+`'in'` condition and fall back to "no codes" for anything else, because
+BPCL's own compans_time row (the shape they were built against) always names
+an explicit inclusion list. A root-toggle-only gate is a shape those three
+files have no way to render.
+
+**Fix, in `js/resolve/resolver.js` (the resolver, not the templates)**: a new
+independent pass, `extractDisabledForCodes()` (triggered by `DISABLE_FOR_RE
+= /\bdisabled?\s+for\b/i`, scanned across the whole cell the same way
+`extractShouldBeConstraint()` already does — not inside
+`resolveEnablement()`'s own filtered sentence loop, precisely because it
+needs to catch sentences THAT loop would drop). Combined via
+`applyDisabledForCodes()`, three cases:
+
+1. **A positive value list already exists** on the relevant dropdown (an
+   `'in'` condition, however it got there — including inside an `'or'` group,
+   optscribe's own usual shape) — the excluded codes are removed from it
+   directly. Most specific case, and the only one needed once a future SOW
+   states both an inclusion AND an exclusion for the same field.
+2. **No value list exists, just a plain gate** (compans_time's actual case
+   here: a bare root-toggle `==`) — "enabled if Y, but disable for X" is
+   exactly "enabled when the dropdown holds any value except X", and over a
+   closed, known option list that IS "holds one of all the others" — so
+   that complement is synthesized as the new `'in'` condition, replacing the
+   plain gate rather than OR-ing alongside it (OR would *widen* enablement to
+   "Y, or this value", backwards from what the SOW says). Dropping the `==`
+   fact is safe specifically because it was always redundant: every one of
+   the four consumers already hardcodes its own root-toggle/category-
+   non-empty guard independently of whatever `enabledWhen` says (see
+   `submitPhp.js`'s own `$disability=='Y' && ... in_array(...)` for
+   `$compans_time` — the codes list was never expected to carry that fact).
+3. **An OR of several already-distinct facts**, none of them an `'in'` on the
+   relevant dropdown — not a shape this has been taught to combine with an
+   exclusion. Left untouched, with a `disable-for-unresolved` warning, rather
+   than guessed at.
+
+A fourth, `disable-for-unattached`, fires when the SOW names an excluded
+value but the paste has no disability-type field at all to attach it to.
+Every substitution (case 2) also warns `disable-for-applied`, since it's the
+one case that changes the meaning of what was resolved rather than just
+narrowing an existing fact — shows up right above the review panel that lets
+a developer override it.
+
+**Generalizes to both layouts.** `typeFieldsForComplement(ctx)` returns
+which dropdown(s) the complement has to be computed against and every code
+each one can hold: Set 1's single type dropdown, or Set 2/3's up to three
+split sub-type fields (reusing `core/set2.js`'s own routing roles — the same
+building blocks `core/fieldcodes.js` exposes to the UI, see "Review panel
+showed one value list for every field" above). A Set 2/3 exclusion is
+computed PER dropdown against that dropdown's own option list, not the full
+type universe — verified with a synthetic IDO-routed case.
+
+Verified end-to-end in Chrome with the user's own paste (properly
+Excel-quoted, doubled internal `"`s): `resolved.compans_time.enabledWhen`
+is now `disability_type in [every code except Low Vision]`; `reg_submit.php`
+lists the real `in_array(...)` codes instead of `&& (0)`; `reg_details.js`'s
+`if(...)` toggle lists the same codes instead of `if(false)`; the warning
+names the row and the excluded value and is fully editable/removable in the
+resolved-conditions panel; zero console errors. New `test/run_disable_for.js`
+(11 assertions, hand-built parseA/parseB per row_exclusions.js's own
+precedent) covers all three combination cases plus the unattached case and a
+Set 2/3 routed case. Every existing fixture is unaffected — none of them use
+"disable for" phrasing, confirmed by the full suite staying green. Node
+suite: 16 files, **558 assertions** (was 547).
+
+## disability_queries no longer ALTERs columns that already exist (2026-09-16)
+
+**Bug, reported by the user with the real base `registration` table's own
+`CREATE TABLE`**: `disability_queries` emitted `ALTER TABLE ... ADD` for
+every pasted field, including eleven whose column is already part of every
+project's base schema — `disability`, `disability_type`,
+`disabilitysuffersoc`, `compensatory`, `compensatary_time`, `compensatory1`,
+`scribe`, `disability_40less`, `compensatory2`, `scribe1`,
+`disability_certify`. Running the generated `ALTER TABLE` for any of those
+against a real project errors immediately, because the column is already
+there — confirmed by cross-checking every DB name `queriesSql.js` can ever
+emit (both dictionaries, Set 1 and Set 2/3) against the pasted schema's 193
+columns.
+
+**Fix**: `PREEXISTING_COLUMNS` in `js/generators/queriesSql.js`, the eleven
+names above, keyed post-`dbNameFor()` since that's the actual column a
+collision is checked against (`optdisability` -> `disability`, etc.). A field
+whose DB name is in the set is skipped entirely — no `ALTER TABLE` line —
+and its name is collected into a leading SQL comment (`-- Already on the base
+\`registration\` table, skipped: ...`) so a developer sees why fewer
+statements exist than fields were pasted, rather than silently wondering.
+Same "don't infer, enumerate" precedent as `DB_NAME_OVERRIDES` — this is the
+base schema's own fixed column list, not something derivable from a SOW's
+Max Length or control type.
+
+**Applies identically to both layouts.** Set 2/3's own `disability_type` row
+holds the CATEGORY, not a type (see "Review panel showed one value list for
+every field" above), but it is still physically the same `disability_type`
+column — skipped there too, confirmed against `set2b`.
+
+BPCL's own output dropped from 19 ALTER statements to 8 (11 skipped, matching
+the eleven names exactly); iifcl (only rows 3-5 pasted) dropped from 3 to 1,
+since 2 of its 3 fields — `disability`/`disability_type` — are among the
+eleven. Verified in Chrome: the `disability_queries` tab renders the skip
+comment and only the genuinely-new columns' DDL, zero console errors.
+`test/run_queriesSql.js` rewritten around the new expected output (23
+assertions, was 11) plus an explicit per-fixture check that no preexisting
+column ever gets an `ADD`. Node suite: 15 files, **547 assertions** (was 535).
+
 ## Acceptance, and the golden harness that was deliberately removed (2026-09-16)
 
 **Read this before trusting any verification claim further down.**
@@ -298,6 +959,14 @@ leakage — that was verified when Set 2 landed. Nothing about shape 3 is
 *known* wrong; it is simply unverified, which is what the warning says.
 Deliberately NOT done, per "we can check that later": no Set 3 entry in the
 layout-override selector, and no attempt to model whatever else may differ.
+
+**SUPERSEDED 2026-09-18** — the reference code for this exact SOW
+(licjamar26) arrived and shape 3 is now verified against it; see "Set 3
+verified against reference code" at the top of this file. Several things this
+paragraph says are no longer true: `set2b` IS licjamar26, Set 3 has its own
+entry in the layout selector (added when layout selection became explicit,
+2026-09-17), and shape 3 WAS known wrong in places — most importantly it
+generated no handler that could open its own multi-select.
 
 `cwc` turns out to be shape 3 too — same single-dropdown structure, but with
 no multi-select row at all — so its fixture metadata moved to `set: 3`
@@ -626,12 +1295,14 @@ is written from `activeTabs().length` rather than naming a fixed count.
   of this file. It turned out to be SOW-derived, not static.
 - ~~**`functions.php` for Set 2**~~ — **CLOSED**: the tab serves both layouts
   again, each getting only the helper its own markup calls.
-- ~~**`set2b`'s shape is supported but unverified**~~ — still unverified, but
-  no longer conflated with Set 2: it is flagged as **shape 3** with its own
-  `set3-layout` warning, per the user. See the top of this file. `cwc` is
-  shape 3 as well; three of its rows are genuinely SOW-specific fields this
-  tool does not model (a CWC-provided-scribe question, a scribe-qualification
-  textbox) and still warn as unmatched, as they did before.
+- ~~**`set2b`'s shape is supported but unverified**~~ — **CLOSED
+  2026-09-18**: its reference code arrived, `set2b` turned out to BE that
+  SOW (licjamar26), and shape 3 is now checked against it by
+  `test/run_set3_generators.js`. See the top of this file. `cwc` is shape 3
+  as well and still has no reference code; three of its rows are genuinely
+  SOW-specific fields this tool does not model (a CWC-provided-scribe
+  question, a scribe-qualification textbox) and still warn as unmatched, as
+  they did before.
 
 Verified in Chrome from `file://`, not just by reading the code: the Set 2
 sample parses to 22 fields / 1 informational warning / 3 exclusion groups;
@@ -1743,9 +2414,11 @@ divergences from the reference were deliberate.)
 
 ## Current phase status
 
-**All phases 0-7 complete for BOTH layouts.** Set 1 is generalized across 4
-real SOWs; **Set 2 landed 2026-09-11** against `uiicljul26`, the one Set 2 SOW
-with reference code — see "Set 2 implemented end-to-end" at the top of this
+**All phases 0-7 complete for ALL THREE layouts.** Set 1 is generalized
+across 4 real SOWs; **Set 2 landed 2026-09-11** against `uiicljul26`, the one
+Set 2 SOW with reference code; **Set 3 was verified 2026-09-18** against
+`licjamar26` (the `set2b` fixture), the one Set 3 SOW with reference code —
+see the top of this file — see "Set 2 implemented end-to-end" at the top of this
 file for the design, the divergences and the residual scope. See "Phase 4",
 "Phase 5" and "Phase 6" below for Set 1's own emitters. The five PRD-original
 output files each byte-matched the BPCL reference when they landed, under the

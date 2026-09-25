@@ -71,17 +71,30 @@
   // which is the rule's own preamble and names no members at all.
   var ONLY_ONE_FROM_RE = /\bonly\s+one\b[^\n]*\bfrom\b/i;
 
+  // The rules are written as a numbered list. Prose ABOUT the rule uses the
+  // same words — licjamar26's own cell explains "a candidate can select only
+  // one sub-type from LD and only one sub-type from VI and so on" one line
+  // above the list that actually states them — and that sentence matched
+  // too, producing a phantom cluster and a spurious discard warning. When any
+  // numbered line is present, the numbered lines ARE the rule and the
+  // unnumbered prose around them is not.
+  var NUMBERED_RE = /^\s*\d+\s*[.)]\s/;
+
   function clustersByOnlyOneFrom(text){
-    var lines = String(text).split(/\n+/);
+    var lines = String(text).split(/\n+/).filter(function(l){ return ONLY_ONE_FROM_RE.test(l); });
+    if (!lines.length) return null;
+    var numbered = lines.filter(function(l){ return NUMBERED_RE.test(l); });
+    if (numbered.length) lines = numbered;
+
     var out = [];
     for (var i = 0; i < lines.length; i++) {
-      if (ONLY_ONE_FROM_RE.test(lines[i])) {
-        // Keep only the part after "from" — the lead-in is boilerplate and
-        // scanning it would be harmless but pointless.
-        var m = /\bfrom\b([\s\S]*)$/i.exec(lines[i]);
-        var body = (m ? m[1] : lines[i]).trim();
-        if (body) out.push(body);
-      }
+      // Keep only the part after the LAST "from" — the lead-in is
+      // boilerplate, and a line naming the parent category ("... from LD
+      // (OA/OL/BA/BL/OAL)") would otherwise carry that category's own name
+      // into the member scan.
+      var m = /^[\s\S]*\bfrom\b([\s\S]*)$/i.exec(lines[i]);
+      var body = (m ? m[1] : lines[i]).trim();
+      if (body) out.push(body);
     }
     return out.length ? out : null;
   }
@@ -90,7 +103,19 @@
     return clustersByShouldNotSelect(text) || clustersByOnlyOneFrom(text);
   }
 
-  function parseExclusions(multiRowValidations, typeIndex, warnings){
+  // Set 2/3 clusters name the PARENT category as well as the members
+  // ("... can select only one disability from LD (OA/OL/BA/BL/OAL)"). A
+  // category is the grouping, never a member of it, so it must not be
+  // reported as an unresolved member — assigning it in the alias panel
+  // would be actively wrong.
+  function dropKnownCategories(missed, categoryIndex){
+    if (!categoryIndex) return missed;
+    return missed.filter(function(abbrev){
+      return !App.scanTypeNames(abbrev, categoryIndex).codes.length;
+    });
+  }
+
+  function parseExclusions(multiRowValidations, typeIndex, warnings, categoryIndex){
     var text = multiRowValidations || '';
     var clusterTexts = extractClusterTexts(text);
     if (!clusterTexts) {
@@ -106,6 +131,20 @@
       var clusterText = clusterTexts[i];
       var scan = App.scanTypeNames(clusterText, typeIndex);
 
+      // PRD §7 — a cluster was found but a member could not be resolved. This
+      // runs BEFORE the too-small discard below, because the cluster most in
+      // need of it is the one that resolved to NOTHING: licjamar26 writes its
+      // LD group as bare initialisms ("OA/OL/BA/BL/OAL") that its own Other
+      // Details never spells out, and discarding first meant those five names
+      // never reached the manual value-alias panel — the very place the
+      // developer resolves them.
+      var missed = dropKnownCategories(App.findUnresolvedAbbrevs(clusterText, typeIndex), categoryIndex);
+      for (var u = 0; u < missed.length; u++) {
+        warnings.push({ code: 'exclusion-member-unresolved', abbrev: missed[u],
+          msg: 'Exclusion cluster member "' + missed[u] + '" could not be resolved to a disability type — ' +
+               'assign it in the value-alias panel, or add it to the group by hand, if it belongs.' });
+      }
+
       // PRD §8 step 7: a cluster resolving to fewer than 2 members is discarded.
       if (scan.codes.length < 2) {
         warnings.push({ code: 'exclusion-cluster-too-small',
@@ -113,14 +152,6 @@
                ' member(s) and was discarded — check it in the review panel: "' +
                clusterText.replace(/\s+/g, ' ').slice(0, 90) + '"' });
         continue;
-      }
-
-      // PRD §7 — a cluster was found but a member could not be resolved.
-      var missed = App.findUnresolvedAbbrevs(clusterText, typeIndex);
-      for (var u = 0; u < missed.length; u++) {
-        warnings.push({ code: 'exclusion-member-unresolved', abbrev: missed[u],
-          msg: 'Exclusion cluster member "' + missed[u] + '" could not be resolved to a disability type — ' +
-               'add it to the group in the review panel if it belongs.' });
       }
 
       // Editable in the review panel; defaults to the matched members' own

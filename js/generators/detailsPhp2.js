@@ -121,13 +121,51 @@
       for (var i = 0; i < fields.length; i++) if (fields[i].postName === postName) return true;
       return false;
     }
+    // The sub-type dropdown's LANG key differs by layout (Set 2
+    // reg_sub_disability, Set 3 reg_sub_disability_type — each reference's
+    // own), so it is read off the claimed field, never written in literally.
+    var subKey = 'reg_sub_disability';
+    for (var sk = 0; sk < fields.length; sk++) if (fields[sk].postName === 'sub_disability_type') subKey = fields[sk].langKey || subKey;
 
     var idoCat = roles.idoCategoryCode || '';
     var mulCode = roles.multipleCode || '';
     var trigger = roles.multiTriggerField || 'subdistypeido';
 
+    // The three hidden mirrors of a field's stored value, read by the real
+    // application's edit window to tell an unchanged answer from a changed
+    // one. Set 1's reference emits the two it has INSIDE a PHP block comment,
+    // and that was reproduced deliberately (CLAUDE.md, 2026-09-04: "match the
+    // reference exactly"). Set 3's reference emits all three LIVE, and its
+    // reg_details.js clears #hidden_cerebral_scribe / #hidden_dominant_scribe
+    // on several handlers -- so leaving them commented out there would point
+    // generated JS at elements that do not exist. Same rule, opposite answer,
+    // because the two references genuinely differ; shape 2 keeps whatever its
+    // own verified output already had.
+    var liveHidden = ctx.parseA.layoutShape === 3;
+
+    function hiddenField(name, dbField){
+      var tag = '\t<?php ?><input type="hidden" name="' + name + '" id="' + name +
+        '" value="<?php echo $row_reg[\'' + dbField + '\']; ?>"><?php ?>\n';
+      if (liveHidden) return tag;
+      return '\t<?php /* ?><input type="hidden" name="' + name + '" id="' + name +
+        '" value="<?php echo $row_reg[\'' + dbField + '\']; ?>"> <?php */ ?>\n';
+    }
+
     var p = [];
     p.push('<!-- Disability -->\n<div class="row reg_det_section">\n\n');
+
+    // Every condition that tests the multi-select reads $disabilitymulti, so
+    // it is set up ONCE, at the top of the section, rather than re-exploded
+    // per field. It used to sit just below the multi-select's own markup,
+    // which was fine only as long as no field ABOVE that row ever tested the
+    // multi-select -- a licjamar26 parse briefly did (a resolver bug put a
+    // sub_disability_multiple test on the category dropdown) and produced PHP
+    // that read $disabilitymulti before it existed. Hoisting removes the
+    // ordering hazard outright; $row_reg is fully populated from the first
+    // line of the template either way.
+    if (has('sub_disability_multiple')) {
+      p.push('<?php\n$disabilitymulti = explode(",", $row_reg[\'sub_disability_multiple\']);\n?>\n\n');
+    }
     p.push('<div class="form-group col-sm-12">\n\t<h5 class="m-0"><?php echo $LANG[\'reg_disblty_lbl\']; ?>:</h5>\n</div>\n\n');
 
     if (has('optdisability')) {
@@ -141,6 +179,7 @@
         '\t\t<input type="radio" value="N" name="optdisability" id="optdisability2" <?php $a = chk_radio($row_reg[\'disability\'], "N"); echo $a; ?> class="custom-control-input optdisability getyears getfee">\n' +
         '\t\t<label class="custom-control-label" for="optdisability2"><?php echo $LANG[\'no_lbl\']; ?></label>\n' +
         '\t</div>\n' +
+        (liveHidden ? hiddenField('hidden_benchmarkdisability', 'disability') : '') +
         '\t<div class="invalid-feedback" id="err_optdisability"></div>\n' +
         '\t<!--Edit Window For lower fee to higher fee -->\n' +
         '\t<!--<div class="invalid-feedback" id="err_disability_edit"></div> -->\n' +
@@ -191,7 +230,7 @@
     // same tier as Set 1's own category-mapping <option> block.
     if (has('sub_disability_type')) {
       p.push('<div class="form-group col-md-6 col-lg-4 ">\n' +
-        '\t<label for="sub_disability_type"><?php echo $LANG[\'reg_sub_disability\']; ?> </label>\n' +
+        '\t<label for="sub_disability_type"><?php echo $LANG[\'' + subKey + '\']; ?> </label>\n' +
         '\t<select class="custom-select optscribesetchange sub_disability_type" name="sub_disability_type" id="sub_disability_type" ' +
         disabledGuard(resolved, 'sub_disability_type', roles, has) + '>\n' +
         '\t\t<option value="" selected="selected"><?php echo $LANG[\'select_btn\']; ?></option>\n' +
@@ -237,24 +276,16 @@
         '</div>\n\n');
     }
 
-    // Every condition below that tests the multi-select reads $disabilitymulti,
-    // so it is set up once here rather than re-exploded per field. Emitted
-    // whenever the multi-select exists, regardless of which dependent fields
-    // this paste happens to have.
-    if (has('sub_disability_multiple')) {
-      p.push('<?php\n$disabilitymulti = explode(",", $row_reg[\'sub_disability_multiple\']);\n?>\n\n');
-    }
-
     p.push(radioBlock(has, resolved, 'compans_time', 'reg_compans_time', 'compans_time1', 'compans_time2',
       'custom-control-input r-bt compans_time', 'custom-control-input compans_time', null));
     p.push(radioBlock(has, resolved, 'disabilitysuffersoc', 'reg_disabilitysuffersoc', 'disabilitysuffersoc1', 'disabilitysuffersoc2',
       'custom-control-input disabilitysuffersoc optscribeset', 'custom-control-input disabilitysuffersoc optscribeset',
-      '\t<?php /* ?><input type="hidden" name="hidden_cerebral_scribe" id="hidden_cerebral_scribe" value="<?php echo $row_reg[\'disabilitysuffersoc\']; ?>"> <?php */ ?>\n'));
+      hiddenField('hidden_cerebral_scribe', 'disabilitysuffersoc')));
     p.push(radioBlock(has, resolved, 'compensatory', 'reg_compensatory', 'compensatory1', 'compensatory2',
       'custom-control-input r-bt compensatory', 'custom-control-input r-bt compensatory', null));
     p.push(radioBlock(has, resolved, 'compensatary_time', 'reg_compensatary_time', 'compensatary_time1', 'compensatary_time2',
       'custom-control-input compensatary_time optscribeset', 'custom-control-input compensatary_time optscribeset',
-      '\t<?php /* ?><input type="hidden" name="hidden_dominant_scribe" id="hidden_dominant_scribe" value="<?php echo $row_reg[\'compensatary_time\']; ?>"> <?php */ ?>\n'));
+      hiddenField('hidden_dominant_scribe', 'compensatary_time')));
     p.push(radioBlock(has, resolved, 'compensatory1', 'reg_compensatory', 'compensatory11', 'compensatory21',
       'custom-control-input r-bt compensatory1', 'custom-control-input r-bt compensatory1', null));
 

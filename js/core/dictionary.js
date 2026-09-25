@@ -188,7 +188,63 @@
     return out;
   })();
 
-  function entriesFor(layout){ return (layout === 2 || layout === '2' || layout === true) ? ENTRIES2 : ENTRIES1; }
+  /* ── Set 1, "Nature of Disability" naming (2026-09-25) ──────────────────
+     Some Set 1 SOWs name the two dropdowns one step down from BPCL's:
+
+         BPCL                    this naming
+         Disability Category     Type of Disability      -> disability_category
+         Type of Disability      Nature of Disability    -> disability_type
+
+     Structurally it is the same section (category A-E, category E opens the
+     multi-select), so only the labels move. "Type of Disability" is ambiguous
+     on its own, so this table is used ONLY when the paste also has a
+     "Nature of Disability" row — see usesNatureNaming(). A paste with a
+     plain "Type of Disability" row and no "Nature" row keeps BPCL's reading. */
+  var ENTRIES1_NATURE = ENTRIES1.map(function(e){
+    if (e.postName !== 'disability_category' && e.postName !== 'disability_type') return e;
+    var t = {};
+    for (var k in e) t[k] = e[k];
+    if (e.postName === 'disability_category') {
+      t.labels = ['type of disability'];
+      t.sig = { all: ['type of disability'], none: ['sub'] };
+    } else {
+      t.labels = ['nature of disability'];
+      t.sig = { all: ['nature of disability'] };
+    }
+    return t;
+  });
+
+  // Set 3 shares Set 2's dictionary except for one LANG key: its reference
+  // (licjamar26) names the sub-type dropdown's key `reg_sub_disability_type`
+  // in every file, where Set 2's reference (uiicljul26) says
+  // `reg_sub_disability`. Each layout emits its own reference's key.
+  var ENTRIES3 = ENTRIES2.map(function(e){
+    if (e.postName !== 'sub_disability_type') return e;
+    var t = {};
+    for (var k in e) t[k] = e[k];
+    t.langKey = 'reg_sub_disability_type';
+    return t;
+  });
+
+  // layout: 1 | 2 | 3 (true / '2' kept for older callers meaning Set 2).
+  // opts.nature: Set 1's "Nature of Disability" naming, above.
+  function entriesFor(layout, opts){
+    if (layout === 3 || layout === '3') return ENTRIES3;
+    if (layout === 2 || layout === '2' || layout === true) return ENTRIES2;
+    return (opts && opts.nature) ? ENTRIES1_NATURE : ENTRIES1;
+  }
+
+  // True when a Set 1 paste uses the "Nature of Disability" naming: some row
+  // is headed "Nature of Disability" and none is headed "Disability
+  // Category" (with both present, BPCL's own reading already fits).
+  function usesNatureNaming(normLabels){
+    var nature = false, category = false;
+    for (var i = 0; i < normLabels.length; i++) {
+      if (normLabels[i].indexOf('nature of disability') !== -1) nature = true;
+      if (normLabels[i].indexOf('disability category') !== -1) category = true;
+    }
+    return nature && !category;
+  }
 
   // Hidden fields belonging to the block (PRD §4). NOTE: the reference emits
   // both inside a PHP block comment; open question for Phase 4, see CLAUDE.md.
@@ -217,8 +273,8 @@
     return true;
   }
 
-  function candidatesFor(norm, layout){
-    var ENTRIES = entriesFor(layout);
+  function candidatesFor(norm, layout, opts){
+    var ENTRIES = entriesFor(layout, opts);
     var exact = [], bySig = [];
     for (var i = 0; i < ENTRIES.length; i++) {
       var e = ENTRIES[i];
@@ -233,10 +289,10 @@
   // Hands out one entry per call for a given label, in declaration order, so
   // repeated labels (three "If Yes... compensatory time" rows) map to
   // compensatory -> compensatory1 -> compensatory2 by position in the paste.
-  function makeLabelClaimer(layout){
+  function makeLabelClaimer(layout, opts){
     var claimed = {};
-    return function claim(normLabelText){
-      var cands = candidatesFor(normLabelText, layout);
+    function claim(normLabelText){
+      var cands = candidatesFor(normLabelText, layout, opts);
       for (var i = 0; i < cands.length; i++) {
         if (!claimed[cands[i].postName]) {
           claimed[cands[i].postName] = true;
@@ -244,7 +300,17 @@
         }
       }
       return null;
+    }
+    // Takes an entry out of the pool up front — a row the developer mapped
+    // by hand, so no other row can claim that field by label.
+    claim.reserve = function(postName){
+      var ENTRIES = entriesFor(layout, opts);
+      for (var i = 0; i < ENTRIES.length; i++) {
+        if (ENTRIES[i].postName === postName) { claimed[postName] = true; return ENTRIES[i]; }
+      }
+      return null;
     };
+    return claim;
   }
 
   function findByNormalizedLabel(norm, layout){
@@ -323,7 +389,9 @@
     ENTRIES: ENTRIES1,
     ENTRIES1: ENTRIES1,
     ENTRIES2: ENTRIES2,
+    ENTRIES3: ENTRIES3,
     entriesFor: entriesFor,
+    usesNatureNaming: usesNatureNaming,
     HIDDEN_FIELDS: HIDDEN_FIELDS,
     LABEL_ALIASES: LABEL_ALIASES,
     makeLabelClaimer: makeLabelClaimer,

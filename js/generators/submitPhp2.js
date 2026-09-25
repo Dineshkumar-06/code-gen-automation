@@ -81,6 +81,14 @@
       if (!g && !rootY) return null;
       if (!g) return rootY;
       if (!rootY) return g;
+      // A guard that IS the root toggle already needs no second copy of it:
+      // licjamar26 gates its cerebral-palsy and dominant-hand questions on
+      // the root toggle alone, which came out as
+      // "$_POST['optdisability'] == 'Y' && $_POST['optdisability'] == 'Y'".
+      // Only the exact-match case is skipped -- an OR guard that merely
+      // MENTIONS the root toggle still gets the conjunct, which is the
+      // documented structural narrowing and is relied on by Set 2's output.
+      if (g === rootY) return g;
       return g + ' && ' + rootY;
     }
 

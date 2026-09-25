@@ -363,3 +363,20 @@ table.excel-table tr.row-mismatch td{background:var(--warn-bg)}
 @media (prefers-reduced-motion: reduce){
   *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
 }
+
+/* Row mapping panel (step 2): one row per pasted row — Sl No, the SOW's own
+   label, and the field it was read as. */
+.row-map-row{flex-wrap:nowrap}
+.row-map-sl{flex:0 0 3.5em;font-family:var(--font-mono);font-size:12px;color:var(--text-muted)}
+.row-map-label{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
+.row-map-row select{flex:0 0 42%;max-width:42%}
+.row-map-unmatched{border-color:var(--warn-br);background:var(--warn-bg)}
+@media (max-width:720px){
+  .row-map-row{flex-wrap:wrap}
+  .row-map-row select{flex-basis:100%;max-width:100%}
+}
+
+/* One-line "Dropdowns read as" note above the warnings (step 2) and under
+   the parse receipt (step 1): neutral, not an alert. */
+.dropdown-summary{font-size:13px;color:var(--text-muted);margin:var(--sp-2) 0;line-height:1.5}
+.dropdown-summary b{color:var(--text);font-weight:600}

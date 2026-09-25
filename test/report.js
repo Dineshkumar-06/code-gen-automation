@@ -20,13 +20,13 @@ const only = process.argv[2];
 for (const s of App.FIXTURES.samples) {
   if (only && s.key !== only) continue;
 
-  const A = App.parseInputA(s.inputA);
+  const A = App.parseInputA(s.inputA, App.FIXTURES.layoutFor(s.key));
   const B = App.parseInputB(s.inputB);
   const R = App.resolveAll(A, B);
   // Whichever row IS the multi-select carries the exclusion rule — the Type
   // of Disability row in Set 1, Sub-Type of Multiple Disability in Set 2.
   const exclSource = App.exclusionSourceField(A);
-  const groups = App.parseExclusions(exclSource ? exclSource.validations : '', R.typeIndex, R.warnings);
+  const groups = App.parseExclusions(exclSource ? exclSource.validations : '', R.typeIndex, R.warnings, R.categoryIndex);
 
   console.log(`\n${'='.repeat(74)}\n${s.name}  (set ${s.set})\n${'='.repeat(74)}`);
 

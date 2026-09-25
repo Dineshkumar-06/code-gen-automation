@@ -1,10 +1,18 @@
-/* Set 2 — Phase S2-0: layout detection, the Set 2 dictionary, and Input B's
-   "Type of Disability / Sub-Type of Disability" header pair.
+/* Set 2 — Phase S2-0: explicit layout selection, the Set 2 dictionary, and
+   Input B's "Type of Disability / Sub-Type of Disability" header pair.
 
    Reference: uiicljul26 ("set 2 references.txt"), the only Set 2 SOW with
-   real reference code. set2b and cwc are Set 2 pastes with no reference code;
-   they are asserted here only for "detected as Set 2, nothing silently
-   mangled", not for output correctness. */
+   real reference code. set2b and cwc are Set 2/3 pastes with no reference
+   code; they are asserted here only for "the chosen layout claims fields
+   correctly, nothing silently mangled", not for output correctness.
+
+   Layout (Set 1/2/3) is an explicit developer choice, not something the
+   parser guesses (see parsing/inputA.js, 2026-09-17) — per the user, prose-
+   based detection could never be made airtight against every future SOW's
+   wording, and it added real complexity (a guess AND an override AND
+   warnings for when they disagreed) for a decision the developer already
+   knows the answer to. Each fixture below is parsed with its own known
+   layout via FIXTURES.layoutFor(). */
 const App = require('./harness.js');
 
 let pass = 0, fail = 0;
@@ -17,26 +25,26 @@ function assertTrue(cond, label, extra){
   if (cond) { pass++; } else { fail++; console.log('FAIL:', label, extra !== undefined ? '\n  ' + JSON.stringify(extra) : ''); }
 }
 
-const parseAOf = k => App.parseInputA(App.FIXTURES.byKey(k).inputA);
+const parseAOf = k => App.parseInputA(App.FIXTURES.byKey(k).inputA, App.FIXTURES.layoutFor(k));
 const parseBOf = k => App.parseInputB(App.FIXTURES.byKey(k).inputB);
 
-// ── layout detection: Set 1 samples must stay Set 1 ──
+// ── choosing 'set1' claims against the Set 1 dictionary, 'set2'/'set3'
+//    against the Set 2/3 dictionary ──
 ['bpcl', 'iifcl', 'nitr', 'csmc'].forEach(k => {
-  assertTrue(parseAOf(k).isSet2 === false, k + ': still detected as Set 1');
+  assertTrue(parseAOf(k).isSet2 === false, k + ': set1 layout claims against the Set 1 dictionary');
 });
 ['uiicl', 'set2b', 'cwc'].forEach(k => {
-  assertTrue(parseAOf(k).isSet2 === true, k + ': detected as a non-Set-1 layout');
+  assertTrue(parseAOf(k).isSet2 === true, k + ': set2/set3 layout claims against the shared Set 2/3 dictionary');
 });
 
-// Two structurally different shapes hide behind "not Set 1". Only shape 2
-// (uiicljul26) has reference code; shape 3 has no "Sub-Type of Disability for
-// <category>" routing dropdown and is flagged separately so its best-effort
-// output is never mistaken for a verified one.
-assertEq(parseAOf('uiicl').layoutShape, 2, 'uiicl: shape 2 (has the routing dropdown)');
-assertEq(parseAOf('set2b').layoutShape, 3, 'set2b: shape 3 (no routing dropdown)');
-assertEq(parseAOf('cwc').layoutShape, 3, 'cwc: shape 3 (no routing dropdown)');
+// layoutShape follows directly from the chosen layout — 'set2' -> shape 2,
+// 'set3' -> shape 3 — it is no longer inferred from whether a subdistypeido
+// row happens to be present.
+assertEq(parseAOf('uiicl').layoutShape, 2, 'uiicl: set2 layout -> shape 2');
+assertEq(parseAOf('set2b').layoutShape, 3, 'set2b: set3 layout -> shape 3');
+assertEq(parseAOf('cwc').layoutShape, 3, 'cwc: set3 layout -> shape 3');
 ['bpcl', 'iifcl', 'nitr', 'csmc'].forEach(k => {
-  assertEq(parseAOf(k).layoutShape, 1, k + ': shape 1');
+  assertEq(parseAOf(k).layoutShape, 1, k + ': set1 layout -> shape 1');
 });
 
 // ── uiicljul26 Input A: every row claims its dictionary entry ──
@@ -81,21 +89,23 @@ assertEq(parseAOf('cwc').layoutShape, 3, 'cwc: shape 3 (no routing dropdown)');
   assertTrue(names.indexOf('sub_disability_type') !== -1, 'set2b: has sub_disability_type');
   assertTrue(names.indexOf('sub_disability_multiple') !== -1, 'set2b: has sub_disability_multiple');
   assertTrue(names.indexOf('subdistypeido') === -1, 'set2b: no subdistypeido (it has no "for <category>" row)', names);
-  assertTrue(a.warnings.some(w => w.code === 'set3-layout'), 'set2b: warned as a third layout, not as Set 2');
-  assertTrue(!a.warnings.some(w => w.code === 'set2-layout'), 'set2b: not claimed to follow the Set 2 reference');
   assertEq(a.warnings.filter(w => w.code === 'unmatched-label').length, 0, 'set2b: zero unmatched labels');
 }
 
-// ── layout override still wins over detection ──
+// ── the layout choice is load-bearing: picking the WRONG one for a paste
+//    claims fields against the wrong dictionary, surfacing as unmatched
+//    labels — this is the actual mechanism the old "override vs. detection"
+//    disagreement warnings used to describe secondhand ──
 {
-  const forced1 = App.parseInputA(App.FIXTURES.byKey('uiicl').inputA, 'set1');
-  assertTrue(forced1.isSet2 === false, 'uiicl forced to Set 1: layout honoured');
-  assertTrue(forced1.warnings.filter(w => w.code === 'unmatched-label').length > 0,
-    'uiicl forced to Set 1: the three Set 2 rows now warn as unmatched (the override is doing something real)');
+  const wrongLayout = App.parseInputA(App.FIXTURES.byKey('uiicl').inputA, 'set1');
+  assertTrue(wrongLayout.isSet2 === false, 'uiicl paste read as set1: honours the (wrong) choice');
+  assertTrue(wrongLayout.warnings.filter(w => w.code === 'unmatched-label').length > 0,
+    'uiicl paste read as set1: its Set 2-only rows now warn as unmatched');
 
-  const forced2 = App.parseInputA(App.FIXTURES.byKey('bpcl').inputA, 'set2');
-  assertTrue(forced2.isSet2 === true, 'bpcl forced to Set 2: layout honoured');
-  assertTrue(forced2.warnings.some(w => w.code === 'set2-forced'), 'bpcl forced to Set 2: set2-forced warning raised');
+  const alsoWrong = App.parseInputA(App.FIXTURES.byKey('bpcl').inputA, 'set2');
+  assertTrue(alsoWrong.isSet2 === true, 'bpcl paste read as set2: honours the (wrong) choice');
+  assertTrue(alsoWrong.warnings.filter(w => w.code === 'unmatched-label').length > 0,
+    'bpcl paste read as set2: its Set 1-only rows (disability_category) now warn as unmatched');
 }
 
 // ── Input B: the Set 2 header pair is recognized, so the header row is NOT

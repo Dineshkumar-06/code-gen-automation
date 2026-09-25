@@ -11,19 +11,21 @@ repurposed. See [CLAUDE.md](CLAUDE.md) for the "why", this file is just the "wha
 ├── TREE.md                       this file
 ├── README.md                     (empty placeholder, not yet written)
 ├── disability_set_1_references.txt  5 real SOWs' Input A/B pastes (no reference code) — source
-│                                    for the iifcl/nitr/csmc/cwc/set2b fixtures
-├── set 2 references.txt          uiicljul26: the one Set 2 SOW WITH reference code for every
-│                                 output file. Source for the `uiicl` fixture and for every
-│                                 Set 2 emitter's template text
+│                                    for the iifcl/nitr/csmc/cwc/set2b fixtures. NOT in git
+├── set 3 code reference.md       licjamar26: the one Set 3 SOW WITH reference code, for every
+│                                 output file. The `set2b` fixture's pastes are byte-identical
+│                                 to this document's own Basic/Other details
 ├── ajax_getSubType_disability.php           supplied verbatim by the user; embedded in
-├── ajax_getSubType_Multiple_disability.php  generators/ajaxPhp2.js as Set 2's two endpoints
+├── ajax_getSubType_Multiple_disability.php  generators/ajaxPhp2.js as Set 2/3's two endpoints
 ├── index.html                    markup only: anti-FOUC theme script, header, stepper, the
 │                                 three step pages; loads css + js in dependency order
 │
 ├── references/
-│   ├── set 1/                    source .xlsx workbooks for the 4 SOWs above (Set 1 layout)
-│   └── set 2/                    (empty) — Set 2's reference material arrived as
-│                                 `set 2 references.txt` instead, not as a workbook
+│   ├── set 1/                    source .xlsx workbooks (csmc/cwc/iifcl/licjamar26/nitr)
+│   ├── set 2/                    uiicljul26.xlsx
+│   └── set 2 references.txt      uiicljul26: the one Set 2 SOW WITH reference code for every
+│                                 output file. Source for the `uiicl` fixture and every Set 2
+│                                 emitter's template text. On disk, not committed
 │
 ├── vendor/highlightjs/           highlight.js, vendored locally — not a CDN dependency, per
 │   ├── highlight.min.js          this project's own "no build step, no CDN" rule. The root
@@ -46,9 +48,11 @@ repurposed. See [CLAUDE.md](CLAUDE.md) for the "why", this file is just the "wha
 │   │   │                         bilingual "/translation" suffix) / normName (type names, does not)
 │   │   ├── dictionary.js         §4 name dictionary: exact-label match, then keyword-signature
 │   │   │                         match, + 12.1-12.4/17-22 constant-block entries + quoted-label
-│   │   │                         alias table (resolver mode 4). TWO layouts: ENTRIES1 (Set 1)
-│   │   │                         and ENTRIES2, built from it so the 19 shared fields can't
-│   │   │                         drift — every lookup takes an optional layout arg
+│   │   │                         alias table (resolver mode 4). ENTRIES1 (Set 1) and
+│   │   │                         ENTRIES2/ENTRIES3 (Set 2/3, built from it so shared fields
+│   │   │                         can't drift; 3 differs only in one LANG key), plus
+│   │   │                         ENTRIES1_NATURE for Set 1's "Type/Nature of Disability"
+│   │   │                         naming. makeLabelClaimer().reserve() backs Row mapping
 │   │   ├── set2.js               Set 2 structural roles shared by every Set 2 emitter: which
 │   │   │                         category routes through subdistypeido (two independent
 │   │   │                         signals), its sub-type codes, the "Multiple Disabilities"
@@ -60,12 +64,13 @@ repurposed. See [CLAUDE.md](CLAUDE.md) for the "why", this file is just the "wha
 │   │   ├── types.js              searchable index over Input B's types: scanTypeNames() finds
 │   │   │                         names/abbreviations directly instead of delimiter-splitting;
 │   │   │                         findUnresolvedAbbrevs() surfaces genuine misses (PRD §7)
-│   │   ├── fixtures.js           FIXTURES.samples[] — 6 real SOW Input A/B pastes (bpcl is the
-│   │   │                         one with reference output; iifcl/nitr/csmc don't have any;
+│   │   ├── fixtures.js           FIXTURES.samples[] — 8 real SOW Input A/B pastes (bpcl is the
+│   │   │                         Set 1 one with reference output; iifcl/nitr/csmc don't have any;
 │   │   │                         uiicl is SHAPE 2 and has reference code for every file;
 │   │   │                         set2b + cwc are SHAPE 3 — one sub-type dropdown serving every
-│   │   │                         category, no routing dropdown — and have none. See the file's
-│   │   │                         own SETS comment)
+│   │   │                         category, no routing dropdown — and set2b IS licjamar26, whose
+│   │   │                         reference code arrived 2026-09-18. See the file's own SETS
+│   │   │                         comment)
 │   │   └── zip.js                dependency-free ZIP writer (STORE method) for "Download all";
 │   │                             hand-rolled UTF-8 + CRC-32 so it needs no TextEncoder and
 │   │                             stays loadable in the Node vm harness
@@ -75,16 +80,14 @@ repurposed. See [CLAUDE.md](CLAUDE.md) for the "why", this file is just the "wha
 │   │   │                         doubled "" -> literal ". Shared by inputA.js and inputB.js
 │   │   ├── inputB.js             Phase 1 — Other Details paste -> categories[]/types[]/mapping{};
 │   │   │                         header-driven column detection, falls back to a sparse/dense
-│   │   │                         structural heuristic
-│   │   └── inputA.js             Phase 2 — Basic Details paste -> field objects. TWO PASSES:
-│   │                             readRows() splits the paste with no dictionary involvement,
-│   │                             detectSet2() runs on those raw rows (isSet2, two independent
-│   │                             signals), then claimFields() claims against THAT layout's
-│   │                             dictionary. Also returns layoutShape (1/2/3): shape 3 is a
-│   │                             non-Set-1 paste with NO "Sub-Type of Disability for
-│   │                             <category>" routing dropdown, flagged distinctly because only
-│   │                             shape 2 has reference code. Optional layoutOverride
-│   │                             ('set1'/'set2') for the UI's manual override
+│   │   │                         structural heuristic. A sub-type cell may list SEVERAL names
+│   │   │                         (cwcsep25: "OL, OA, ADV, MDY, DR") - split on , and ; but never
+│   │   │                         on /, which is part of a name here ("MD/ID")
+│   │   └── inputA.js             Phase 2 — Basic Details paste -> field objects. readRows()
+│   │                             splits the paste, then claimFields() claims against the
+│   │                             layout the developer CHOSE ('set1'/'set2'/'set3', no
+│   │                             detection). Detects Set 1's "Nature of Disability" naming;
+│   │                             applies Row mapping overrides ({row: postName|''}) first
 │   │
 │   ├── resolve/
 │   │   ├── resolver.js           Phase 3 — the five resolver modes -> enabledWhen/constraint,
@@ -190,9 +193,10 @@ repurposed. See [CLAUDE.md](CLAUDE.md) for the "why", this file is just the "wha
 │   │   │                         the shared inline-SVG icon set
 │   │   └── ui.js                 DOM-touching: layout-aware TABS (`sets` field hides the other
 │   │                             layout's companion AJAX files from the strip, the zip and the
-│   │                             step-3 manifest), Excel view, warnings, the three editable
-│   │                             review panels (value aliases, resolved conditions,
-│   │                             exclusion groups), the step-2 preview tab strip, and the
+│   │                             step-3 manifest), Excel view, warnings, the Row mapping
+│   │                             panel (re-point a row to another field; re-reads the paste),
+│   │                             the three editable review panels (value aliases, resolved
+│   │                             conditions, exclusion groups), the step-2 preview tab strip, and the
 │   │                             step-3 file manifest + copy/download/zip actions
 │   │
 │   └── main.js                   bootstrap; theme, stepper, tab strip, sample picker, the
@@ -218,11 +222,21 @@ repurposed. See [CLAUDE.md](CLAUDE.md) for the "why", this file is just the "wha
     ├── run_set2_generators.js    Set 2 — all twelve output files: expected content, a PHP-aware
     │                             brace/quote balance walker, a real parse of reg_details.js,
     │                             and a zero-absent-field-leakage sweep across every fixture
+    ├── run_set3_generators.js    Set 3 — licjamar26 (the set2b fixture) against its reference
+    │                             code: the multi-select flow, the optgroup grouping, the live
+    │                             hidden mirrors, the alias round-trip that yields all three
+    │                             exclusion groups, plus cwc as the no-multi-select shape-3 case
     ├── run_qryArrays.js         Phase 7 acceptance test (reg_qry_arrays.php)
     ├── run_langPhp.js           Phase 7 acceptance test (reg_details_lang.php)
     ├── run_queriesSql.js        Phase 7 acceptance test (disability_queries)
     ├── run_printPhp.js          Phase 7 acceptance test (print.php)
+    ├── run_disable_for.js       resolver — "Disable for <value>" exclusions: all three
+    │                            combination cases, the unattached case, and a routed case
     ├── run_fieldcodes.js        core/fieldcodes.js — each field's own value list, all 3 shapes
+    ├── run_nature.js            Set 1 "Type / Nature of Disability" naming (fixture `nature`),
+    │                            its two typos (unclosed popup quote, "Cerebral Pasy"), and
+    │                            the Row mapping panel's per-row overrides, quoted-label lookup
+    │                            against the paste's own rows, and unknown Other Details headers
     ├── run_zip.js               core/zip.js round-trip test (parses its own zip back out)
     └── report.js                human-readable resolver dump for one/all fixtures — the
                                  "eyeball it" view for samples with no reference code to diff
@@ -246,6 +260,8 @@ node test/run_zip.js
 node test/run_set2_parse.js
 node test/run_set2_resolve.js
 node test/run_set2_generators.js
+node test/run_set3_generators.js
+node test/run_nature.js
 node test/report.js nitr        # or: bpcl, iifcl, csmc, uiicl, set2b, cwc — omit for all
 ```
 
@@ -255,7 +271,7 @@ Or all of them at once (POSIX shell):
 for f in test/run_*.js; do echo "--- $f"; node "$f" | tail -1; done
 ```
 
-14 files, 505 assertions.
+18 files, 730 assertions.
 
 ## Running the app
 

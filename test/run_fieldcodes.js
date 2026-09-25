@@ -23,7 +23,7 @@ function assertTrue(cond, label, extra){
 
 function envFor(key){
   const sample = App.FIXTURES.byKey(key);
-  const parseA = App.parseInputA(sample.inputA);
+  const parseA = App.parseInputA(sample.inputA, App.FIXTURES.layoutFor(key));
   const parseB = App.parseInputB(sample.inputB);
   const resolve = App.resolveAll(parseA, parseB);
   return { parseA, parseB, roles: resolve.set2, resolve };
@@ -129,7 +129,7 @@ function namesOf(env, postName){
 
 // ── no crash on any fixture, for any field it actually pastes ──
 App.FIXTURES.samples.forEach(function(sample){
-  const parseA = App.parseInputA(sample.inputA);
+  const parseA = App.parseInputA(sample.inputA, App.FIXTURES.layoutFor(sample.key));
   const parseB = App.parseInputB(sample.inputB);
   const roles = App.resolveAll(parseA, parseB).set2;
   let ok = true;

@@ -23,10 +23,45 @@
   // pass runs first to catch exactly that shape: the column headed "Sub-…"
   // is the narrower (type) column, and the parent column is whichever other
   // column is headed with a category-or-type word.
-  var SUB_HDR_RE    = /sub\s*-?\s*(type|categor)/i;
+  //
+  // Some Set 1 SOWs head the pair "Type of Disability" / "Nature of
+  // Disability" instead — the same trap (the parent column says "Type of",
+  // no column says "category"), and "Nature of" is the narrower column
+  // exactly as "Sub-" is, so it takes the same pass.
+  var SUB_HDR_RE    = /sub\s*-?\s*(type|categor)|nature\s*of/i;
   var PARENT_HDR_RE = /categor|type\s*of/i;
 
   function trimCell(v){ return String(v == null ? '' : v).trim(); }
+
+  // A sub-type cell does not always hold ONE sub-type. cwcsep25 writes a
+  // whole group on one line:
+  //
+  //     Category   Sub-Category
+  //     OH         OL, OA, ADV, MDY, DR
+  //     HH         HH
+  //     VH         LV
+  //
+  // where the other SOWs would have given OL/OA/ADV/MDY/DR a row each with a
+  // blank category cell. Read literally that cell becomes a single disability
+  // named "OL, OA, ADV, MDY, DR" -- one that no validation sentence can ever
+  // match by name, and one the generated dropdown offers as a single
+  // nonsense option.
+  //
+  // Only ',' and ';' separate. NOT '/': a slash is part of a NAME here, not a
+  // separator -- "MD/ID" and "ID/MD" are single category labels in two of the
+  // real pastes, and splitting on it would shred them. (This is the opposite
+  // of how validation PROSE is read, where '/' does separate names. The
+  // difference is that prose is free text and a table cell is not, so here
+  // the safe delimiters are the ones no real name in any sample contains:
+  // checked across all seven pastes, no category label or sub-type name holds
+  // a comma or a semicolon, and the only cell that does is this one.)
+  var LIST_SEP_RE = /\s*[,;]\s*/;
+
+  function splitTypeCell(cell){
+    return String(cell).split(LIST_SEP_RE)
+      .map(function(s){ return s.trim(); })
+      .filter(Boolean);
+  }
 
   function detectColumnsBySubHeader(rows){
     for (var r = 0; r < Math.min(rows.length, 5); r++) {
@@ -89,6 +124,37 @@
 
   function pad2(n){ return (n < 10 ? '0' : '') + n; }
 
+  // When no header is recognised the shape fallback has no header row to
+  // skip, so a header this file has not seen ("Group | Disability Name")
+  // used to be read as a real category + type, shifting every code by one
+  // with no warning at all. A category cell that reads like a column heading
+  // gives it away: across every real paste, category labels are short codes
+  // ("A", "a - VI", "OH", "MD/ID") and none contain these words.
+  var HEADERISH_RE = /categor|type|group|class|disabilit|nature|kind|name|\bs\.?\s*no\b/i;
+
+  function guessHeaderRow(rows, cols, warnings){
+    var first = -1;
+    for (var r = 0; r < rows.length; r++) {
+      if (trimCell(rows[r][cols.catCol]) || trimCell(rows[r][cols.typeCol])) { first = r; break; }
+    }
+    if (first === -1) return;
+    var cat = trimCell(rows[first][cols.catCol]), typ = trimCell(rows[first][cols.typeCol]);
+    var shown = '"' + cat + (typ ? ' | ' + typ : '') + '"';
+    var othersHeaderish = false;
+    for (var k = first + 1; k < rows.length; k++) {
+      if (HEADERISH_RE.test(trimCell(rows[k][cols.catCol]))) { othersHeaderish = true; break; }
+    }
+    if (cat && HEADERISH_RE.test(cat) && !othersHeaderish) {
+      cols.headerRow = first;
+      warnings.push({ code: 'inputb-header-guessed',
+        msg: 'Other Details: took ' + shown + ' as the header row (its column names are not ones this tool knows).' });
+    } else {
+      warnings.push({ code: 'inputb-no-header',
+        msg: 'Other Details: no header row recognised, so the first row ' + shown +
+             ' was read as data. If it is a header, delete it from the paste.' });
+    }
+  }
+
   function parseInputB(raw){
     var rows = App.parseTSV(raw);
     var cols = detectColumnsBySubHeader(rows) || detectColumnsByHeader(rows) || detectColumnsByShape(rows);
@@ -101,9 +167,11 @@
         msg: 'Could not locate a Disability Category / Type of Disability column pair in Input B.' });
       return { categories: categories, types: types, mapping: mapping, warnings: warnings };
     }
+    if (cols.headerRow === -1) guessHeaderRow(rows, cols, warnings);
 
     var openCatCode = null, catCounter = 0, typeCounter = 0;
     var catCodeByNorm = {};
+    var splitCells = [];
 
     for (var i = 0; i < rows.length; i++) {
       if (i === cols.headerRow) continue;
@@ -131,15 +199,33 @@
       if (!typeCell) continue;
       if (openCatCode === null) continue;
 
-      var nk = normName(typeCell);
-      var typeCode = typeCodeByNorm[nk];
-      if (!typeCode) {
-        typeCounter++;
-        typeCode = pad2(typeCounter);
-        typeCodeByNorm[nk] = typeCode;
-        types.push({ code: typeCode, name: typeCell });
+      var names = splitTypeCell(typeCell);
+      // Deduped: cwcsep25 lists its whole table twice, and naming the same
+      // cell twice in the warning reads like two different problems.
+      if (names.length > 1 && splitCells.indexOf(typeCell) === -1) splitCells.push(typeCell);
+
+      for (var n = 0; n < names.length; n++) {
+        var nk = normName(names[n]);
+        var typeCode = typeCodeByNorm[nk];
+        if (!typeCode) {
+          typeCounter++;
+          typeCode = pad2(typeCounter);
+          typeCodeByNorm[nk] = typeCode;
+          types.push({ code: typeCode, name: names[n] });
+        }
+        if (mapping[openCatCode].indexOf(typeCode) === -1) mapping[openCatCode].push(typeCode);
       }
-      if (mapping[openCatCode].indexOf(typeCode) === -1) mapping[openCatCode].push(typeCode);
+    }
+
+    // Reported even though it is almost always right, because it is the one
+    // place a genuine name containing a comma would be silently torn in two.
+    // It shows up in the review panel next to the value lists it produced, so
+    // a wrong split is visible rather than buried in a dropdown.
+    if (splitCells.length) {
+      warnings.push({ code: 'inputb-type-list-split',
+        msg: splitCells.length + ' Input B cell(s) listed several sub-types on one line and were split on ' +
+             'commas: ' + splitCells.map(function(c){ return '"' + c + '"'; }).join(', ') +
+             '. Check the resulting values are right if any single name genuinely contains a comma.' });
     }
 
     for (var ci = 0; ci < categories.length; ci++) {

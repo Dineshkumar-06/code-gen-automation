@@ -60,6 +60,30 @@ const GENS = ['config', 'detailsPhp', 'detailsJs', 'validations', 'submit'];
   assertTrue(submit.includes('$Scribe_flg'), 'bpcl submit: scribe-enable flag computation present');
 }
 
+// ── compensatary_time's own "Should be YES if <type> is selected in <point>"
+//    constraint must reach reg_validations.php, mirroring disabilitysuffersoc's
+//    constraint handling — bug reported by the user against a real SOW row
+//    reading "...Should select Yes or No & Should be YES if 'Cerebral palsy'
+//    is selected in 5.": validationsPhp.js used to hardcode compensatary_time's
+//    validation to plain Yes/No unconditionally, silently dropping the
+//    constraint the resolver had already extracted (2026-09-17 fix) ──
+{
+  const sample = App.FIXTURES.byKey('bpcl');
+  const parseA = App.parseInputA(sample.inputA);
+  const parseB = App.parseInputB(sample.inputB);
+  const field = parseA.fields.find(f => f.postName === 'compensatary_time');
+  field.validations = 'Enabled & Mandatory if selected "OC/Locomotor disability" under point. No. 4 OR 4.3. Should select Yes or No & Should be YES if "Cerebral palsy" is selected in 5.';
+  const resolve = App.resolveAll(parseA, parseB);
+  assertEq(resolve.resolved.compensatary_time.constraint, { whenField: 'disability_type', op: 'includes', code: '15', shouldBe: 'Y' }, 'compensatary_time: constraint resolved from its own Validations text');
+
+  const typeField = parseA.fields.filter(f => f.control === 'select+multiselect')[0];
+  const exclusionGroups = App.parseExclusions(typeField ? typeField.validations : '', resolve.typeIndex, resolve.warnings);
+  const validations = App.GEN.validations({ parseA, parseB, resolve, exclusionGroups });
+  assertTrue(validations.includes("$_POST['disability_type'] == '15' || (is_array($_POST['disability_multiple']) && in_array('15',$_POST['disability_multiple']))") &&
+    validations.includes("$validate_flds_value['compensatary_time'] = 'reg_compensatary_time|Should be Yes|Y|C'"),
+    'compensatary_time: conditional Should-be-Yes check reaches reg_validations.php, not just the plain Yes/No fallback');
+}
+
 // ── iifcljul26: only rows 3-5 pasted — every emitter must reflect that
 //    subset, not the full BPCL-shaped template (the "fields not in the
 //    paste" bug class this whole tool was built to avoid) ──

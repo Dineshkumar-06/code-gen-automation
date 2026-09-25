@@ -32,9 +32,28 @@
    hidden_dominant_scribe) are also correctly absent: they live only in
    detailsPhp.js's dictionary.js HIDDEN_FIELDS list, comment-wrapped and
    never actually submitted (see CLAUDE.md "Phase 4"), and never appear in
-   ctx.parseA.fields at all. */
+   ctx.parseA.fields at all.
+
+   PREEXISTING_COLUMNS (2026-09-16): eleven of this dictionary's DB columns
+   already exist on every project's `registration` table — they are part of
+   the generic base schema every project starts from, not something a
+   disability SOW adds. Per the user, who supplied that base CREATE TABLE:
+   emitting `ALTER TABLE ... ADD` for a column that already exists errors the
+   moment the statement runs, so this file must NOT emit one for them. Same
+   "don't infer, enumerate" precedent as DB_NAME_OVERRIDES above — this is
+   the fixed base schema's own column list, not a rule derivable from a SOW's
+   Max Length/control, so it's spelled out rather than detected. Keyed by DB
+   name (post-`dbNameFor()`), since that's the actual column identity a
+   collision is checked against. */
 (function(App){
   var DICT = App.DICT;
+
+  var PREEXISTING_COLUMNS = {
+    disability: true, disability_type: true, disabilitysuffersoc: true,
+    compensatory: true, compensatary_time: true, compensatory1: true,
+    scribe: true, disability_40less: true, compensatory2: true,
+    scribe1: true, disability_certify: true
+  };
 
   // Fallback only for a select/text field whose own Max Length cell is
   // missing or non-numeric — has never fired against any real SOW fixture
@@ -69,12 +88,15 @@
   function genQueries(ctx){
     var fields = ctx.parseA.fields;
     var lines = [];
+    var skipped = [];
 
     for (var i = 0; i < fields.length; i++) {
       var f = fields[i];
       if (!f.postName || f.isNote) continue;
 
       var dbName = DICT.dbNameFor(f.postName);
+      if (PREEXISTING_COLUMNS[dbName]) { skipped.push(dbName); continue; }
+
       if (f.control === 'radio') {
         lines.push(alterLine(dbName, "ENUM( 'Y', 'N' )"));
       } else if (f.control === 'checkbox') {
@@ -87,7 +109,12 @@
       // any other control isn't emitted by the dictionary at all — nothing else to handle
     }
 
-    return lines.join('\n');
+    // Say which columns were left out and why, rather than a developer
+    // wondering why fewer statements exist than fields were pasted.
+    var header = skipped.length
+      ? '-- Already on the base `registration` table, skipped: ' + skipped.join(', ') + '\n'
+      : '';
+    return header + lines.join('\n');
   }
 
   App.GEN = App.GEN || {};

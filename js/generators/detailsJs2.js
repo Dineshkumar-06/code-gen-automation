@@ -108,6 +108,12 @@
     var popupCats = ctx.resolve.popupCategories;
 
     // Code lists, each already routed to the dropdown that offers it.
+    // compans_time is opened by whichever dropdown the requirement points it
+    // at. In the routing shape that is subdistypeido; in shape 3 there is no
+    // routing dropdown and the single sub-type dropdown does both jobs, so
+    // this reads the trigger field's own codes rather than naming
+    // subdistypeido, which shape 3 does not have.
+    var compansTrig  = codesFor(resolved.compans_time, trigger);
     var compansIdo   = codesFor(resolved.compans_time, 'subdistypeido');
     var compansMulti = codesFor(resolved.compans_time, 'sub_disability_multiple');
     var socCats      = codesFor(resolved.disabilitysuffersoc, 'disability_type');
@@ -132,6 +138,23 @@
       if (has('compensatary_time')) out += indent + "$(\".compensatary_time\").prop({ 'disabled': false, 'checked': false });\n";
       if (has('compensatory1')) out += propLine(has, ['compensatory1'], DISABLE, indent);
       return out;
+    }
+    // Shape 3's reg_details.php emits the hidden value-mirrors live (see
+    // detailsPhp2.js's hiddenField), and its reference JS blanks them
+    // wherever the answer they mirror is being reset. Shape 2 keeps them
+    // commented out, so there is nothing there to clear and this is ''.
+    var HIDDEN_MIRRORS = [
+      ['hidden_cerebral_scribe', 'disabilitysuffersoc'],
+      ['hidden_dominant_scribe', 'compensatary_time']
+    ];
+    function clearHidden(indent){
+      if (ctx.parseA.layoutShape !== 3) return '';
+      var ids = [];
+      for (var i = 0; i < HIDDEN_MIRRORS.length; i++) {
+        if (has(HIDDEN_MIRRORS[i][1])) ids.push('#' + HIDDEN_MIRRORS[i][0]);
+      }
+      if (!ids.length) return '';
+      return indent + '$("' + ids.join(',') + '").val(\'\');\n';
     }
     function clearMultiSelect(indent){
       if (!has('sub_disability_multiple')) return '';
@@ -186,6 +209,13 @@
              "\t\t$(\".subdistypeido\").prop('disabled', true);\n" +
              clearMultiSelect('\t\t') +
              '\t}\n\n';
+      } else {
+        // No routing dropdown to clear the multi-select on the way past, so
+        // the category dropdown has to do it itself: the multi-select's
+        // options were fetched for the OLD category and none of them can
+        // still be valid. The reference does exactly this.
+        h += clearMultiSelect('\t');
+        if (clearMultiSelect('\t')) h += '\n';
       }
 
       if (has('sub_disability_type')) {
@@ -211,36 +241,53 @@
       p.push(h);
     }
 
-    // ── 2. the sub-type dropdown resets whatever hangs off it ─────────────
-    if (has('sub_disability_type')) {
-      var r = resetSocGroup('\t');
-      if (r) p.push('$("#sub_disability_type").change(function () {\n' + r + '});\n\n');
-    }
+    // ── 2/3. the sub-type dropdowns. Whichever of them carries the "Multiple
+    //        Disabilities" option is the one that OPENS the multi-select and
+    //        gates compans_time (core/set2.js's multiTriggerField): the
+    //        routing dropdown in shape 2, the single sub-type dropdown in
+    //        shape 3. This used to be hardcoded to #subdistypeido, so a
+    //        shape-3 paste generated no handler that could ever open its own
+    //        multi-select — the one flow that layout is built around.
+    //        A non-trigger sub-type dropdown still resets what hangs off it.
+    var triggerSel = (trigger === 'subdistypeido') ? '#subdistypeido' : '#' + trigger;
 
-    // ── 3. the routing dropdown opens the multi-select / compans_time ─────
-    if (has('subdistypeido')) {
-      var h3 = '$("#subdistypeido").change(function () {\n' +
+    function triggerHandler(){
+      var h3 = '$("' + triggerSel + '").change(function () {\n' +
         '\tvar df = $(this).val();\n\n';
-      if (has('sub_disability_multiple')) {
+      var wrote3 = false;
+      if (has('sub_disability_multiple') && mulCode) {
         h3 += "\tif (df == '" + mulCode + "') {\n" +
               "\t\t$(\"#sub_disability_multiple\").prop('disabled', false);\n" +
               '\t\tgetSub_TypeMuldisability();\n' +
               '\t} else {\n' +
               clearMultiSelect('\t\t') +
-              resetSocGroup('\t\t') +
-              propLine(has, ['optscribe'], "{ 'checked': false }", '\t\t') +
+              // Only if the cerebral-palsy / dominant-hand pair actually
+              // hangs off the multi-select. It does in shape 2; in shape 3
+              // that pair is gated on the root toggle alone, and resetting it
+              // here would switch off a question the SOW says is on.
+              (socMulti.length ? resetSocGroup('\t\t') : '') +
+              clearHidden('\t\t') +
+              propLine(has, ['optscribe'], DISABLE, '\t\t') +
               '\t}\n\n';
+        wrote3 = true;
       }
-      if (has('compans_time') && compansIdo.length) {
-        h3 += '\tif (' + anyEquals('df', compansIdo) + ') {\n' +
+      if (has('compans_time') && compansTrig.length) {
+        h3 += '\tif (' + anyEquals('df', compansTrig) + ') {\n' +
               "\t\t$(\".compans_time\").prop({ 'disabled': false, 'checked': false });\n" +
               '\t} else {\n' +
               "\t\t$(\".compans_time\").prop({ 'disabled': true, 'checked': false });\n" +
               '\t}\n';
+        wrote3 = true;
       }
       h3 += '});\n\n';
-      p.push(h3);
+      return wrote3 ? h3 : '';
     }
+
+    if (has('sub_disability_type') && trigger !== 'sub_disability_type') {
+      var r = resetSocGroup('\t');
+      if (r) p.push('$("#sub_disability_type").change(function () {\n' + r + '});\n\n');
+    }
+    if (trigger && has(trigger)) p.push(triggerHandler());
 
     // ── 4. the multi-select drives compans_time and the cerebral/dominant
     //       pair. The reference binds TWO separate change handlers to this
@@ -335,6 +382,16 @@
     // ── 10. the root toggle resets the whole section ─────────────────────
     if (has('optdisability')) {
       var common = '';
+      // The category dropdown is reset like every other dependent field. It
+      // was missing here entirely, so nothing in the generated JS could ever
+      // re-enable it: reg_details.php renders it `disabled` while the stored
+      // answer is not Y, and answering Y on the page left it stuck that way
+      // until a reload. rootYEnable below turns it back on, because its
+      // resolved condition IS the root toggle.
+      if (has('disability_type')) {
+        common += '\t\t$("#disability_type").val(\'\');\n' +
+                  "\t\t$(\"#disability_type\").prop('disabled', true);\n";
+      }
       if (has('subdistypeido')) {
         common += '\t\t$(".subdistypeido").val(\'\');\n' +
                   "\t\t$(\".subdistypeido\").prop('disabled', true);\n";
@@ -351,6 +408,21 @@
         propLine(has, ['compensatory2'], DISABLE, '\t\t') +
         propLine(has, ['disability_certify'], DISABLE, '\t\t');
 
+      // Everything above is switched OFF in both branches; answering Y then
+      // switches back on whatever the root toggle ALONE is enough to enable.
+      // Which fields those are is read from resolved{}, not listed here: for
+      // licjamar26 the cerebral-palsy and dominant-hand questions are gated
+      // on the root toggle and nothing else, so without this they were reset
+      // by this handler and never re-enabled by any other. For uiicljul26
+      // that same pair is gated on the CATEGORY, so it correctly stays off
+      // here and its own category handler turns it on.
+      var rootYEnable = rootYFields(resolved, has)
+        .map(function(f){
+          return (f === 'disability_type' || f === 'sub_disability_type')
+            ? "\t\t$(\"#" + f + "\").prop('disabled', false);\n"
+            : "\t\t$(\"." + f + "\").prop({ 'disabled': false, 'checked': false });\n";
+        }).join('');
+
       // The 2(s) sub-tree is the ONE thing that differs between the branches:
       // answering N to the root toggle is what opens it.
       var less = has('optdisability_40less');
@@ -358,9 +430,11 @@
         scribeDetailReset('\t') +
         "\n\tif ($(this).val() == 'Y') {\n" +
         common +
+        rootYEnable +
         (less ? "\t\t$(\".optdisability_40less\").prop({ 'disabled': true, 'checked': false });\n" : '') +
         '\t} else {\n' +
         common +
+        clearHidden('\t\t') +
         (less ? "\t\t$(\".optdisability_40less\").prop({ 'disabled': false, 'checked': false });\n" : '') +
         '\t}\n});\n\n');
     }
@@ -425,10 +499,97 @@
     // #subdistypeido here would name an element the second known Set 2 shape
     // (fixture set2b) does not have.
     if (has('sub_disability_multiple')) {
-      p.push(SUBTYPE_MULTIPLE_HELPERS.split('%TRIGGER%').join(trigger));
+      p.push(SUBTYPE_MULTIPLE_HELPERS
+        .split('%TRIGGER%').join(trigger)
+        .split('%OPTGROUPS%').join(
+          optgroupBlocks(ctx.parseB.categories || [], ctx.parseB.mapping || {}, roles.mulOptionCodes)));
     }
 
     return p.join('').replace(/\s+$/, '') + '\n';
+  }
+
+  // The multi-select is grouped by category, the same grouping
+  // functionsPhp2.js's PrintArrSub_disDetails() prints on the FIRST render.
+  // The reference builds it in JS with one <optgroup> per category and a
+  // hardcoded code test per group; both the labels and their membership come
+  // from Input B, so they are generated here rather than fixed. Without this
+  // the AJAX refetch replaced a grouped list with a flat one the moment the
+  // candidate changed anything -- the same list, rendered two different ways
+  // in the same page.
+  function optgroupBlocks(categories, mapping, offeredCodes){
+    var offered = {};
+    for (var i = 0; i < offeredCodes.length; i++) offered[offeredCodes[i]] = true;
+
+    var out = '', n = 0;
+    for (var c = 0; c < categories.length; c++) {
+      var csv = String(mapping[categories[c].code] || '');
+      var codes = (csv ? csv.split(',') : []).filter(function(code){ return code && offered[code]; });
+      if (!codes.length) continue;   // no empty <optgroup>
+      n++;
+      var g = 'gr' + n, o = 'opt' + n;
+      var tests = codes.map(function(code){ return "centre_code1 == '" + code + "'"; }).join(' || ');
+      out +=
+        '\t\t\t' + g + " = document.createElement('optgroup');\n" +
+        '\t\t\t' + g + '.label = ' + JSON.stringify(String(categories[c].label).trim()) + ';\n' +
+        '\t\t\tfor (i = 0; i < centre_multiple1.length; i++) {\n' +
+        '\t\t\t\tcentre_list1 = centre_multiple1[i];\n' +
+        '\t\t\t\tvar centre_info1 = centre_list1.split("|");\n' +
+        '\t\t\t\tcentre_code1 = jQuery.trim(centre_info1[0].toString());\n' +
+        '\t\t\t\tcentre_value1 = jQuery.trim(centre_info1[1].toString());\n' +
+        '\t\t\t\tif (' + tests + ') {\n' +
+        '\t\t\t\t\t' + o + " = document.createElement('option');\n" +
+        '\t\t\t\t\t' + o + '.textContent = centre_value1;\n' +
+        '\t\t\t\t\t' + o + '.value = centre_code1;\n' +
+        '\t\t\t\t\t' + g + '.appendChild(' + o + ');\n' +
+        '\t\t\t\t}\n' +
+        '\t\t\t}\n' +
+        "\t\t\tdocument.getElementById('sub_disability_multiple').appendChild(" + g + ');\n';
+      if (c < categories.length - 1) out += '\n';
+    }
+    // Nothing groupable (no category maps to an offered code) -- fall back to
+    // the plain flat list rather than emitting an empty else-branch.
+    if (!out) {
+      out = '\t\t\tfor (i = 0; i < centre_multiple1.length; i++) {\n' +
+        '\t\t\t\tcentre_list1 = centre_multiple1[i];\n' +
+        '\t\t\t\tvar centre_info1 = centre_list1.split("|");\n' +
+        '\t\t\t\tcentre_code1 = jQuery.trim(centre_info1[0].toString());\n' +
+        '\t\t\t\tcentre_value1 = jQuery.trim(centre_info1[1].toString());\n' +
+        "\t\t\t\tdocument.getElementById('sub_disability_multiple').options[x] = new Option(centre_value1, centre_code1);\n" +
+        '\t\t\t\tx++;\n' +
+        '\t\t\t}\n';
+    }
+    return out;
+  }
+
+  // Which fields answering Y to the root toggle is, on its own, enough to
+  // enable: those whose resolved condition is optdisability == 'Y', either
+  // outright or as one arm of the OR. Read from resolved{} rather than
+  // hardcoded, so a SOW that gates the same question differently gets the
+  // handler its own requirement describes.
+  // The sub-type dropdowns are never opened by the root toggle even when
+  // their resolved condition names it as one arm of an OR: each is populated
+  // by its own parent dropdown's change handler (getSub_Typedisability /
+  // getSub_TypeMuldisability), and the root toggle has just cleared that
+  // parent, so enabling them here would show an empty list. This is the same
+  // structural fact detailsPhp2.js's structuralGuard encodes for the PHP side.
+  var PARENT_OPENED = { subdistypeido: 1, sub_disability_type: 1, sub_disability_multiple: 1 };
+
+  function rootYFields(resolved, has){
+    var out = [];
+    Object.keys(resolved).forEach(function(postName){
+      if (postName === 'optdisability' || !has(postName)) return;
+      if (PARENT_OPENED[postName]) return;
+      var when = resolved[postName].enabledWhen;
+      if (!when) return;
+      var conds = (when.op === 'or') ? when.conditions : [when];
+      for (var i = 0; i < conds.length; i++) {
+        if (conds[i].op === '==' && conds[i].field === 'optdisability' && conds[i].value === 'Y') {
+          out.push(postName);
+          return;
+        }
+      }
+    });
+    return out;
   }
 
   // The scribe-detail reset that trails the enable computation in handler 7.
@@ -498,14 +659,7 @@
     "\t\t\tdocument.getElementById('sub_disability_multiple').options[x] = new Option(centre_value1, centre_code1);\n" +
     '\t\t} else {\n' +
     '\t\t\tvar centre_multiple1 = centre_list1.split(",");\n' +
-    '\t\t\tfor (i = 0; i < centre_multiple1.length; i++) {\n' +
-    '\t\t\t\tcentre_list1 = centre_multiple1[i];\n' +
-    '\t\t\t\tvar centre_info1 = centre_list1.split("|");\n' +
-    '\t\t\t\tcentre_code1 = jQuery.trim(centre_info1[0].toString());\n' +
-    '\t\t\t\tcentre_value1 = jQuery.trim(centre_info1[1].toString());\n' +
-    "\t\t\t\tdocument.getElementById('sub_disability_multiple').options[x] = new Option(centre_value1, centre_code1);\n" +
-    '\t\t\t\tx++;\n' +
-    '\t\t\t}\n' +
+    '%OPTGROUPS%' +
     '\t\t}\n' +
     '\t}\n' +
     '}\n\n' +

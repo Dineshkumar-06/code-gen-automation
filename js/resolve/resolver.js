@@ -54,7 +54,16 @@
   var POINT_REF_RE_G = new RegExp(POINT_REF_RE.source, 'gi');
   var BARE_REF_RE    = /\bin\s+(\d+(?:\.\d+)*)\b/i;
   var ENABLEMENT_RE  = /\benabled\b|\bmandatory\b/i;
-  var SHOULD_BE_Y_RE = /should\s+be\s+(?:yes|y)\b/i;
+  // "Should be YES if ...", and the same rule worded "Mandatorily Yes if ..."
+  // (a Set 1 SOW with the "Nature of Disability" naming) or "must be Yes".
+  var SHOULD_BE_Y_RE = /(?:should\s+be|must\s+be|mandatorily)\s+(?:yes|y)\b/i;
+  // "Disable for Low Vision" — an EXCLUSION on an otherwise-enabled field.
+  // Deliberately its own pass, not folded into resolveEnablement(): that
+  // function only looks at sentences matching ENABLEMENT_RE, and "Disable
+  // for X" contains neither "enabled" nor "mandatory", so it was being
+  // silently dropped — the field's base rule (root toggle Y) resolved fine,
+  // but the exception never reached the output at all.
+  var DISABLE_FOR_RE = /\bdisabled?\s+for\b/i;
 
   // "point no 5.1 or 6.1", "under point. No. 5 or 6 or 6.1" — Set 2 routinely
   // asks one question of several dropdowns at once. The first reference is
@@ -97,17 +106,52 @@
     return { start: start, end: end };
   }
 
+  // Where the popup MESSAGE itself sits in a cell. The message is the longest
+  // quoted span (the same rule extractPopupText applies), which is not always
+  // the FIRST quoted span after the lead-in: licjamar26 writes
+  //
+  //     A popup message should be displayed to VI, HI, LD, "ID/MD" candidates
+  //     "Please select 'Yes', if you are VI, LD(cerebral palsy /dominant
+  //     hand), ..."
+  //
+  // — one of the categories the popup is FOR is itself quoted, ahead of the
+  // message. Stopping at the first quote therefore leaves the real message in
+  // the text, and "cerebral palsy" inside it was being scanned as a value
+  // name, resolving that row to an enablement condition the SOW never states.
+  var POPUP_LEAD_RE = /(?:A\s+)?pop\s*-?\s*up\s+message[^"“”]*/i;
+
+  //
+  // The closing quote is sometimes simply missing — a Set 1 SOW writes
+  // 'displayed to candidates "Please select 'Yes' if ... in the exam.' and
+  // the cell ends. With no quoted span after the lead-in, the message is then
+  // everything after the opening quote (`unterminated: true`), rather than
+  // falling back to some other quoted span in the cell.
+  function findPopupSpan(text){
+    text = String(text || '');
+    var lead = POPUP_LEAD_RE.exec(text);
+    if (!lead) return null;
+    var leadEnd = lead.index + lead[0].length;
+    var spans = extractQuotedSpans(text).filter(function(q){ return q.start >= lead.index; });
+    if (!spans.length) {
+      var open = text.slice(leadEnd).search(/["“”]/);
+      if (open !== -1) {
+        var from = leadEnd + open;
+        return { leadStart: lead.index, msgStart: from, end: text.length,
+                 text: text.slice(from + 1).trim(), unterminated: true };
+      }
+      return { leadStart: lead.index, msgStart: leadEnd, end: leadEnd, text: '' };
+    }
+    var longest = spans[0];
+    for (var i = 1; i < spans.length; i++) if (spans[i].text.length > longest.text.length) longest = spans[i];
+    return { leadStart: lead.index, msgStart: longest.start, end: longest.end, text: longest.text.trim() };
+  }
+
   // Remove the popup quote and the exclusion clause before scanning for
   // enablement, so neither contaminates point-ref / name detection.
   function stripNoiseSpans(text){
     var spans = [];
-    var lead = /A popup message should be displayed[^"“”]*/i.exec(text);
-    if (lead) {
-      var after = text.slice(lead.index + lead[0].length);
-      var q = extractQuotedSpans(after)[0];
-      if (q && q.start === 0) spans.push([lead.index, lead.index + lead[0].length + q.end]);
-      else spans.push([lead.index, lead.index + lead[0].length]);
-    }
+    var popup = findPopupSpan(text);
+    if (popup) spans.push([popup.leadStart, popup.end]);
     var excl = findExclusionClauseSpan(text);
     if (excl) spans.push([excl.start, excl.end]);
 
@@ -160,9 +204,44 @@
     return out;
   }
 
-  function resolveQuotedLabel(text){
+  // A quoted label is looked up against THIS paste's own rows first: the
+  // SOW quotes its own wording, which is not necessarily the dictionary's
+  // (and a row the developer re-pointed in Row mapping is only findable
+  // this way). Exact match on the normalized label, or — for a quote of 12+
+  // characters — one being a prefix of the other, since SOWs quote their
+  // labels shortened ("...40% and above" for "...40% and above ?"). Then the
+  // dictionary's own labels and paraphrase aliases, as before.
+  function resolveQuotedLabel(text, ctx, self){
     var norm = normLabel(text);
-    return DICT.findByNormalizedLabel(norm) || DICT.resolveAlias(norm);
+    if (!norm) return null;
+    var fields = (ctx && ctx.fields) || [];
+    var prefix = null;
+    for (var i = 0; i < fields.length; i++) {
+      var f = fields[i];
+      if (!f.postName || f.isNote || f === self) continue;
+      var fl = normLabel(f.label);
+      if (fl === norm) return f;
+      if (!prefix && norm.length >= 12 && (fl.indexOf(norm) === 0 || norm.indexOf(fl) === 0)) prefix = f;
+    }
+    if (prefix) return prefix;
+    // The dictionary's keyword signatures also fire on quoted VALUES
+    // ('"Cerebral palsy"' matches disabilitysuffersoc's own signature), so a
+    // hit naming the row being resolved is discarded: a field is never
+    // enabled by itself.
+    var hit = DICT.findByNormalizedLabel(norm) || DICT.resolveAlias(norm);
+    return (hit && self && hit.postName === self.postName) ? null : hit;
+  }
+
+  // Does a quoted span that resolved to no field still read as the NAME of
+  // another question (so dropping it loses a condition), rather than a value
+  // like "Yes" or "Cerebral palsy"? Three or more words, and no disability
+  // type or category named in it.
+  function looksLikeQuestionRef(text, ctx){
+    var t = String(text || '').trim();
+    if (t.split(/\s+/).length < 3) return false;
+    if (App.scanTypeNames(t, ctx.typeIndex).codes.length) return false;
+    if (ctx.categoryIndex && App.scanTypeNames(t, ctx.categoryIndex).codes.length) return false;
+    return true;
   }
 
   function resolvePointRefField(ref, ctx, sourceSlNo, warnings){
@@ -284,12 +363,23 @@
         var quoted = extractQuotedSpans(clause);
         var labelHit = null;
         for (var q = 0; q < quoted.length; q++) {
-          var hit = resolveQuotedLabel(quoted[q].text);
+          var hit = resolveQuotedLabel(quoted[q].text, ctx, field);
           if (hit) { labelHit = hit; break; }
         }
         if (labelHit) {
           conditions.push(makeCondition(labelHit, cue));
           continue;
+        }
+        // "selected yes for "<a label no row has>"" used to vanish without a
+        // trace. Say so, unless a point reference in the same clause still
+        // carries the condition.
+        if (cue && !pm) {
+          for (var uq = 0; uq < quoted.length; uq++) {
+            if (!looksLikeQuestionRef(quoted[uq].text, ctx)) continue;
+            warnings.push({ code: 'quoted-label-unresolved', slNo: field.slNo,
+              msg: 'Row ' + field.slNo + ': "' + quoted[uq].text.trim().slice(0, 70) + '" reads as another question, but no pasted row has that label — ' +
+                   'this condition was not generated. Fix the row under Row mapping, or add the condition by hand below.' });
+          }
         }
 
         if (pm && cue) {
@@ -382,14 +472,55 @@
     var sentences = splitSentences(text);
     for (var s = 0; s < sentences.length; s++) {
       var sen = sentences[s];
-      if (!SHOULD_BE_Y_RE.test(sen)) continue;
-      if (/should\s+be\s+(?:yes|y)\b\s*(?:or|\/)\s*no/i.test(sen)) continue; // "should be Yes or No"
+      var sm = SHOULD_BE_Y_RE.exec(sen);
+      if (!sm) continue;
+      // The rule's value and reference always FOLLOW the phrase ("Should be
+      // YES if <value> is selected in <ref>"). Text before it belongs to
+      // whatever came first: one SOW writes '...40% and above". In point 4
+      // Mandatorily Yes if "Cerebral Pasy" is selected in point no. 6', where
+      // "point 4" is the tail of the enablement clause, not this rule's row.
+      sen = sen.slice(sm.index);
+      if (/(?:should\s+be|must\s+be|mandatorily)\s+(?:yes|y)\b\s*(?:or|\/)\s*no/i.test(sen)) continue; // "should be Yes or No"
 
       var scan = App.scanTypeNames(sen, ctx.typeIndex);
-      if (!scan.codes.length) continue;
+      if (!scan.codes.length) {
+        // The rule is there but its value is not in the type table — usually
+        // a misspelling ('"Cerebral Pasy"'). Name the quoted value so the
+        // value-alias panel can offer it, rather than dropping the rule.
+        var qs = extractQuotedSpans(sen);
+        for (var qi = 0; qi < qs.length; qi++) {
+          var qn = qs[qi].text.trim();
+          if (!qn || /^(?:yes|no|y|n)$/i.test(qn)) continue;
+          warnings.push({ code: 'value-name-unmatched', abbrev: qn, slNo: field.slNo,
+            msg: 'Row ' + field.slNo + ': "' + qn + '" in a "should be Yes if ..." rule has no match in the type table — ' +
+                 'assign it below and the rule will be picked up.' });
+        }
+        continue;
+      }
 
-      var pm = sen.match(POINT_REF_RE) || sen.match(BARE_REF_RE);
-      var target = pm ? resolvePointRefField(pm[1], ctx, field.slNo, warnings) : null;
+      // Which reference the constraint hangs off. A constraint sentence can
+      // name SEVERAL rows — licjamar26 writes 'Should be YES if "Cerebral
+      // palsy" is selected in 5 or Point no 6', meaning the sub-type dropdown
+      // (5) or the multi-select (6). The EARLIEST reference is the scalar
+      // dropdown the emitters test with '=='; the multi-select is tested with
+      // in_array() alongside it by the emitter itself, so it needs no
+      // separate whenField. Taking the "point"-spelled match first instead
+      // picked row 6 here and emitted a scalar == against an array field.
+      var target = null;
+      var cands = [];
+      var pmPoint = sen.match(POINT_REF_RE);
+      var pmBare  = sen.match(BARE_REF_RE);
+      if (pmPoint) cands.push({ at: pmPoint.index, ref: pmPoint[1] });
+      if (pmBare)  cands.push({ at: pmBare.index,  ref: pmBare[1]  });
+      cands.sort(function(a, b){ return a.at - b.at; });
+      for (var r = 0; r < cands.length; r++) {
+        // A number that names no row in this paste is not a reference at all
+        // ("... in 40% ..."), so fall through to the next candidate rather
+        // than warning about it.
+        if (!ctx.fieldsBySlNo[cands[r].ref]) continue;
+        target = resolvePointRefField(cands[r].ref, ctx, field.slNo, warnings);
+        if (target) break;
+      }
       var targetName = (target && target.postName) || ctx.typeFieldPostName;
       if (!targetName) continue;
 
@@ -398,10 +529,125 @@
     return null;
   }
 
+  // Which type-code dropdown(s) an exclusion has to be checked/complemented
+  // against, and every code each one can actually hold. Set 1 has exactly
+  // one (the type dropdown); Set 2/3's sub-type question is split across up
+  // to three fields, each with its own smaller option list (reusing the same
+  // roles core/set2.js already derived, and fieldcodes.js already exposes to
+  // the UI — see "Review panel showed one value list for every field").
+  function typeFieldsForComplement(ctx){
+    var allCodes = ctx.typeIndex.entries.map(function(e){ return e.code; });
+    if (!ctx.set2) {
+      return ctx.typeFieldPostName ? [{ field: ctx.typeFieldPostName, allCodes: allCodes }] : [];
+    }
+    var roles = ctx.set2;
+    var isIdo = {};
+    for (var i = 0; i < roles.idoTypeCodes.length; i++) isIdo[roles.idoTypeCodes[i]] = true;
+    var out = [];
+    if (ctx.hasField['subdistypeido']) out.push({ field: 'subdistypeido', allCodes: roles.idoTypeCodes.slice() });
+    if (ctx.hasField['sub_disability_type']) {
+      out.push({ field: 'sub_disability_type', allCodes: allCodes.filter(function(c){ return !isIdo[c]; }) });
+    }
+    if (ctx.hasField['sub_disability_multiple']) out.push({ field: 'sub_disability_multiple', allCodes: roles.mulOptionCodes.slice() });
+    return out;
+  }
+
+  function codeNames(codes, ctx){
+    var byCode = {};
+    for (var i = 0; i < ctx.typeIndex.entries.length; i++) byCode[ctx.typeIndex.entries[i].code] = ctx.typeIndex.entries[i].name;
+    return codes.map(function(c){ return byCode[c] || c; });
+  }
+
+  // Scans the WHOLE cell independently of resolveEnablement's own sentence
+  // filter — see DISABLE_FOR_RE above for why this can't share that pass.
+  function extractDisabledForCodes(text, ctx, field, warnings){
+    var sentences = splitSentences(text).filter(function(s){ return DISABLE_FOR_RE.test(s); });
+    if (!sentences.length) return null;
+    var codes = [];
+    for (var s = 0; s < sentences.length; s++) {
+      codes = codes.concat(App.scanTypeNames(sentences[s], ctx.typeIndex).codes);
+      var missed = App.findUnresolvedAbbrevs(sentences[s], ctx.typeIndex);
+      for (var u = 0; u < missed.length; u++) {
+        warnings.push({ code: 'value-name-unmatched', abbrev: missed[u], slNo: field.slNo,
+          msg: 'Row ' + field.slNo + ': "' + missed[u] + '" looks like a disability value but has no match in the type table — ' +
+               'add it in the review panel if it belongs.' });
+      }
+    }
+    codes = uniqSortAsc(codes);
+    return codes.length ? codes : null;
+  }
+
+  // Folds a "disable for <values>" exclusion into `conditions`. Two shapes:
+  //   - a positive value list already exists on the same dropdown (an 'in'
+  //     condition) -> the excluded codes are simply removed from it, since
+  //     they were never a value that should have enabled the field anyway;
+  //   - no value list exists yet, just a plain gate like a root Y/N toggle
+  //     -> "enabled if Y, but disable for X" is exactly "enabled when the
+  //     dropdown holds ANY value except X", which over a closed, known
+  //     option list is the same as "enabled when it holds one of ALL THE
+  //     OTHERS" — so that complement is synthesized as the new condition.
+  //     It replaces the plain gate rather than OR-ing alongside it (OR would
+  //     WIDEN enablement to "Y, or this value", the opposite of the rule),
+  //     and it is safe to drop: every consumer that reads this exact shape
+  //     (compans_time/optscribe's own codes-list extraction in
+  //     detailsJs.js/validationsPhp.js/submitPhp.js) already ANDs its own
+  //     hardcoded root-toggle/category-non-empty guard independently of
+  //     whatever this condition says — see submitPhp.js's own
+  //     "$disability=='Y' && ... in_array(...)" for $compans_time.
+  function applyDisabledForCodes(conditions, disabledCodes, ctx, field, warnings){
+    var targets = typeFieldsForComplement(ctx);
+    if (!targets.length) {
+      warnings.push({ code: 'disable-for-unattached',
+        msg: 'Row ' + field.slNo + ': "disable for ' + codeNames(disabledCodes, ctx).join(', ') +
+             '" names a value but this paste has no disability-type field to attach the exclusion to.' });
+      return conditions;
+    }
+
+    var disabledSet = {};
+    for (var i = 0; i < disabledCodes.length; i++) disabledSet[disabledCodes[i]] = true;
+
+    var touchedExisting = false;
+    for (var c = 0; c < conditions.length; c++) {
+      var cond = conditions[c];
+      if (cond.op !== 'in') continue;
+      for (var t = 0; t < targets.length; t++) {
+        if (targets[t].field !== cond.field) continue;
+        cond.codes = cond.codes.filter(function(code){ return !disabledSet[code]; });
+        touchedExisting = true;
+      }
+    }
+    if (touchedExisting) return conditions;
+
+    if (conditions.length > 1) {
+      // An OR of several already-distinct facts, none of them a value list
+      // on the relevant dropdown — not a shape this has been taught to
+      // combine with an exclusion. Leave it rather than guess.
+      warnings.push({ code: 'disable-for-unresolved',
+        msg: 'Row ' + field.slNo + ': "disable for ' + codeNames(disabledCodes, ctx).join(', ') +
+             '" could not be combined with this field\'s other conditions automatically — check the review panel.' });
+      return conditions;
+    }
+
+    var synthesized = [];
+    for (var s = 0; s < targets.length; s++) {
+      var kept = uniqSortAsc(targets[s].allCodes.filter(function(code){ return !disabledSet[code]; }));
+      if (kept.length) synthesized.push({ field: targets[s].field, op: 'in', codes: kept });
+    }
+    if (!synthesized.length) return conditions;
+
+    warnings.push({ code: 'disable-for-applied',
+      msg: 'Row ' + field.slNo + ': "disable for ' + codeNames(disabledCodes, ctx).join(', ') +
+           '" combined with this row\'s own base condition into a positive value list. Verify in the review panel.' });
+    return synthesized;
+  }
+
   function resolveField(field, ctx, warnings){
     var text = field.validations || '';
     var constraint = extractShouldBeConstraint(text, field, ctx, warnings);
     var conditions = resolveEnablement(field, stripNoiseSpans(text), ctx, warnings);
+
+    var disabledCodes = extractDisabledForCodes(text, ctx, field, warnings);
+    if (disabledCodes) conditions = applyDisabledForCodes(conditions, disabledCodes, ctx, field, warnings);
 
     if (!conditions.length && !constraint) return null;
 
@@ -412,7 +658,15 @@
     return result;
   }
 
-  function extractPopupText(text, warnings){
+  function extractPopupText(text, warnings, slNo){
+    var popup = findPopupSpan(text);
+    if (popup && popup.text) {
+      if (popup.unterminated) {
+        warnings.push({ code: 'popup-unterminated',
+          msg: 'Row ' + slNo + ': the popup message has no closing quote — everything after the opening quote was used. Check it in the review panel.' });
+      }
+      return popup.text;
+    }
     var spans = extractQuotedSpans(text);
     if (!spans.length) {
       warnings.push({ code: 'no-popup-message',
@@ -434,12 +688,12 @@
   // duly hangs it off .scribe1 (row 16), not off row 15's own field.
   var POPUP_SENTENCE_RE = /pop\s*-?\s*up/i;
 
-  function extractFieldPopups(fields, fieldsBySlNo){
+  function extractFieldPopups(fields, fieldsBySlNo, popupPostName){
     var out = {};
     for (var i = 0; i < fields.length; i++) {
       var field = fields[i];
       if (!field.postName || field.isNote) continue;
-      if (field.postName === 'disability_type') continue;   // the type row's popup is popupText
+      if (field.postName === (popupPostName || 'disability_type')) continue;   // that row's popup is popupText
       var sentences = splitSentences(field.validations || '');
       for (var s = 0; s < sentences.length; s++) {
         if (!POPUP_SENTENCE_RE.test(sentences[s])) continue;
@@ -458,15 +712,19 @@
     return out;
   }
 
-  // Set 2's alert() does not fire for every category: the requirement names
+  // Set 2/3's alert() does not fire for every category: the requirement names
   // the ones it is for — "A popup message should be displayed to VI, OC,
   // MD/ID candidates \"...\"" — and the reference reg_details.js duly tests
   // $(this).val() against exactly those three. The names sit in the lead-in
-  // BEFORE the quoted message, so the scan stops at the first quote.
+  // BEFORE the quoted message — but a category name can itself be quoted
+  // there (licjamar26 writes 'to VI, HI, LD, "ID/MD" candidates "<message>"'),
+  // so the scan runs to where the MESSAGE starts, not to the first quote.
+  // Stopping at the first quote silently dropped ID/MD from that SOW's list.
   function extractPopupTriggerCodes(text, categoryIndex, warnings){
-    var lead = /pop\s*-?\s*up[^"“”]*/i.exec(String(text || ''));
-    if (!lead) return null;
-    var scan = App.scanTypeNames(lead[0], categoryIndex);
+    var popup = findPopupSpan(text);
+    if (!popup) return null;
+    var leadIn = String(text || '').slice(popup.leadStart, popup.msgStart);
+    var scan = App.scanTypeNames(leadIn, categoryIndex);
     if (!scan.codes.length) {
       warnings.push({ code: 'popup-categories-not-named',
         msg: 'The popup sentence does not name which disability categories it is for, ' +
@@ -502,7 +760,15 @@
 
     // The row carrying the section's single alert() text: the type dropdown in
     // Set 1, the category dropdown (also called "Type of Disability") in Set 2.
+    //
+    // A Set 1 SOW with the "Nature of Disability" naming states the popup on
+    // its "Type of Disability" row, which is the CATEGORY dropdown there — so
+    // when the type row has no popup and the category row does, use that.
     var popupField = typeField;
+    if (!parseA.isSet2 && !(typeField && POPUP_LEAD_RE.test(typeField.validations || ''))) {
+      var catField = parseA.fields.filter(function(x){ return x.postName === 'disability_category'; })[0];
+      if (catField && POPUP_LEAD_RE.test(catField.validations || '')) popupField = catField;
+    }
     var set2 = null, categoryIndex = null;
     if (parseA.isSet2) {
       set2 = App.SET2.roles(parseA, parseB);
@@ -529,12 +795,17 @@
       var field = parseA.fields[k];
       if (field.isNote || field.constant || !field.postName) continue;
       if (!field.validations || !field.validations.trim()) continue;
+      // The root toggle enables everything else and is never itself gated.
+      // Its cell often says so ("If this point is selected as Yes then point
+      // 5 to 13 should be enabled"), which read as a condition ON the root
+      // naming point 5 — a nonsense card in the review panel.
+      if (field.postName === 'optdisability') continue;
       var r = resolveField(field, ctx, warnings);
       if (r) resolved[field.postName] = r;
     }
 
-    var popupText = popupField ? extractPopupText(popupField.validations || '', warnings) : null;
-    var fieldPopups = extractFieldPopups(parseA.fields, fieldsBySlNo);
+    var popupText = popupField ? extractPopupText(popupField.validations || '', warnings, popupField.slNo) : null;
+    var fieldPopups = extractFieldPopups(parseA.fields, fieldsBySlNo, popupField && popupField.postName);
     var popupCategories = (set2 && popupText && popupField)
       ? extractPopupTriggerCodes(popupField.validations || '', categoryIndex, warnings) : null;
 

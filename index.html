@@ -62,9 +62,10 @@
       <select id="sample-picker" class="btn" onchange="loadSample(this.value)" aria-label="Load a sample SOW"></select>
       <label class="field-inline">Layout:
         <select id="layout-override" class="btn btn-s" onchange="generate()">
-          <option value="">Auto-detect</option>
-          <option value="set1">Force Set 1</option>
-          <option value="set2">Force Set 2</option>
+          <option value="" disabled selected>Select layout…</option>
+          <option value="set1">Set 1</option>
+          <option value="set2">Set 2</option>
+          <option value="set3">Set 3</option>
         </select>
       </label>
     </div>
@@ -102,6 +103,17 @@
     </div>
 
     <div id="alerts-box" class="alerts-box"></div>
+
+    <div id="row-map-panel" class="panel hidden">
+      <div class="excel-view-hdr">
+        <h2>Row mapping <span class="muted" id="row-map-summary"></span></h2>
+        <button class="btn btn-s" id="row-map-toggle" onclick="toggleRowMap(this)">Show</button>
+      </div>
+      <div id="row-map-body" class="hidden">
+        <p class="panel-hint">The field each pasted row was read as. If a row's label was read wrongly, pick the right field. Changing a row re-reads the conditions below and discards edits made to them.</p>
+        <div id="row-map-rows"></div>
+      </div>
+    </div>
 
     <div id="value-alias-panel" class="panel hidden"></div>
 

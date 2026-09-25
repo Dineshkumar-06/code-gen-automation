@@ -25,7 +25,7 @@ function assertTrue(cond, label, extra){
 }
 
 const sample = App.FIXTURES.byKey('uiicl');
-const parseA = App.parseInputA(sample.inputA);
+const parseA = App.parseInputA(sample.inputA, App.FIXTURES.layoutFor('uiicl'));
 const parseB = App.parseInputB(sample.inputB);
 const R = App.resolveAll(parseA, parseB);
 const cond = k => JSON.parse(JSON.stringify(R.resolved[k] && R.resolved[k].enabledWhen));
@@ -119,9 +119,9 @@ assertEq(R.fieldPopups, {
   assertEq(row15.postName, 'compensatory2', 'sanity: row 15 is compensatory2, not scribe1');
 }
 
-// ── no surprises ──
-assertEq(R.warnings.map(w => w.code), ['set2-layout'],
-  'uiicl resolves with only the informational layout notice', R.warnings.map(w => w.msg));
+// ── no surprises — layout is now an explicit developer choice, so there is
+//    no "detected as Set 2" notice to carry any more (2026-09-17) ──
+assertEq(R.warnings, [], 'uiicl resolves with zero warnings', R.warnings.map(w => w.msg));
 
 // ── exclusion groups: Set 2 states them as numbered "only one ... from" lines ──
 {
@@ -164,7 +164,7 @@ assertEq(R.warnings.map(w => w.code), ['set2-layout'],
 // ── no crash across every fixture ──
 App.FIXTURES.samples.forEach(s => {
   try {
-    const pa = App.parseInputA(s.inputA), pb = App.parseInputB(s.inputB);
+    const pa = App.parseInputA(s.inputA, App.FIXTURES.layoutFor(s.key)), pb = App.parseInputB(s.inputB);
     const r = App.resolveAll(pa, pb);
     const src = App.exclusionSourceField(pa);
     App.parseExclusions(src ? src.validations : '', r.typeIndex, []);

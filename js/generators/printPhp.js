@@ -162,6 +162,10 @@
       for (var i = 0; i < fields.length; i++) if (fields[i].postName === postName) return true;
       return false;
     }
+    // Set 2 says reg_sub_disability, Set 3 reg_sub_disability_type (each
+    // reference's own) — read off the claimed field.
+    var subKey = 'reg_sub_disability';
+    for (var sk = 0; sk < fields.length; sk++) if (fields[sk].postName === 'sub_disability_type') subKey = fields[sk].langKey || subKey;
 
     var isSet2 = !!(ctx.parseA && ctx.parseA.isSet2);
 
@@ -173,7 +177,7 @@
       if (has('disability_category')) parts.push(ROW_DISABILITY_CATEGORY);
       if (has('disability_type')) parts.push(isSet2 ? ROW_DISABILITY_TYPE_SET2 : ROW_DISABILITY_TYPE);
       if (has('subdistypeido')) parts.push(ROW_SUBDISTYPEIDO);
-      if (has('sub_disability_type')) parts.push(ROW_SUB_DISABILITY_TYPE);
+      if (has('sub_disability_type')) parts.push(ROW_SUB_DISABILITY_TYPE.replace("'reg_sub_disability'", "'" + subKey + "'"));
       if (has('sub_disability_multiple')) parts.push(ROW_SUB_DISABILITY_MULTIPLE);
       if (has('compans_time')) parts.push(ROW_COMPANS_TIME);
       if (has('disabilitysuffersoc')) parts.push(ROW_DISABILITYSUFFERSOC);

@@ -33,7 +33,7 @@ function assertLacks(hay, needle, label){
 
 function ctxFor(key){
   const sample = App.FIXTURES.byKey(key);
-  const parseA = App.parseInputA(sample.inputA);
+  const parseA = App.parseInputA(sample.inputA, App.FIXTURES.layoutFor(key));
   const parseB = App.parseInputB(sample.inputB);
   const resolve = App.resolveAll(parseA, parseB);
   const src = App.exclusionSourceField(parseA);
@@ -175,6 +175,34 @@ const C = ctxFor('uiicl');
   assertHas(out, "$_POST['sub_disability_type'] == '14' || (is_array($_POST['sub_disability_multiple']) && in_array(\"14\",$_POST['sub_disability_multiple'],true))",
     'cerebral-palsy constraint checks both the sub-type dropdown and the multi-select');
   assertHas(out, "'reg_disabilitysuffersoc|Should be Yes|Y|C'", 'cerebral-palsy constraint forces Yes');
+}
+
+// ── compensatary_time's own "Should be YES if <type> is selected in <point>"
+//    constraint must reach reg_validations.php here too — bug reported by the
+//    user against a real Set 2/3 SOW row reading "...Should select Yes or No
+//    & Should be YES if 'Cerebral palsy' is selected in 7.2.": domBody() in
+//    validationsPhp2.js hardcoded the plain Yes/No check unconditionally,
+//    same bug class as disabilitysuffersoc's own constraint handling right
+//    above, just never caught here because uiicl's own compensatary_time row
+//    carries no such clause (2026-09-17 fix) ──
+{
+  const sample = App.FIXTURES.byKey('uiicl');
+  const parseA = App.parseInputA(sample.inputA, App.FIXTURES.layoutFor('uiicl'));
+  const parseB = App.parseInputB(sample.inputB);
+  const field = parseA.fields.find(f => f.postName === 'compensatary_time');
+  field.validations = 'Enabled & Mandatory if selected "OC/HI" under point. No. 5 or 6 or 6.1. Should select Yes or No & Should be YES if "Cerebral palsy" is selected in 6.1.';
+  const resolve = App.resolveAll(parseA, parseB);
+  assertTrue(!!(resolve.resolved.compensatary_time && resolve.resolved.compensatary_time.constraint),
+    'compensatary_time (set2): constraint resolved from its own Validations text');
+
+  const src = App.exclusionSourceField(parseA);
+  const exclusionGroups = App.parseExclusions(src ? src.validations : '', resolve.typeIndex, []);
+  const out = App.GEN.validations({ parseA, parseB, resolve, exclusionGroups, set2: resolve.set2 || null });
+  const c = resolve.resolved.compensatary_time.constraint;
+  assertHas(out, "$_POST['" + c.whenField + "'] == '" + c.code + "' || (is_array($_POST['sub_disability_multiple']) && in_array(\"" + c.code + "\",$_POST['sub_disability_multiple'],true))",
+    'compensatary_time (set2): conditional Should-be-Yes check reaches reg_validations.php');
+  assertHas(out, "$validate_flds_value['compensatary_time'] = 'reg_compensatary_time|Should be Yes|Y|C'",
+    'compensatary_time (set2): forces Yes when its own constraint value is selected');
 }
 
 // ── the Set 3 shape (set2b): no routing dropdown, so the single sub-type

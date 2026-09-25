@@ -5,9 +5,13 @@
 
    Same design as the other Phase 4-6 emitters: fixed template text per field,
    gated on has(postName), with resolver-derived dynamic pieces spliced in:
-   the disabilitysuffersoc Y-constraint code (resolved.disabilitysuffersoc.constraint),
-   the compans_time/optscribe enabling code-lists (same resolved 'in' conditions
-   detailsJs.js/submitPhp.js already use), and the exclusion-group block itself —
+   the disabilitysuffersoc AND compensatary_time Y-constraint codes
+   (resolved.disabilitysuffersoc.constraint / resolved.compensatary_time.constraint
+   — each field's own "Should be YES if <type> is selected in <point>" clause,
+   found independently since it's scanned from that field's own Validations
+   text), the compans_time/optscribe enabling code-lists (same resolved 'in'
+   conditions detailsJs.js/submitPhp.js already use), and the exclusion-group
+   block itself —
    PRD §8 requires $exclgrpN/$exclcntN arrays and the final structural gate to be
    built from however many groups THIS SOW's paste produces, never hardcoded for
    three.
@@ -160,13 +164,27 @@
       return "\t\t\n\t\t//------------------ disabilitysuffersoc ----------------\n\t\t$mandatory_flds['disabilitysuffersoc'] = 'reg_disabilitysuffersoc|radiobutton|1|disabilitysuffersoc'; \n\t\t\n\t\tif($_POST['disability_type'] == '15' || (is_array($_POST['disability_multiple']) && in_array('15',$_POST['disability_multiple'])))\n\t\t{\n\t\t\t$validate_flds_value['disabilitysuffersoc'] = 'reg_disabilitysuffersoc|Should be Yes|Y|C';\n\t\t} else {\n\t\t\t$validate_flds_value['disabilitysuffersoc'] = 'reg_disabilitysuffersoc|Should be either Yes or No|Y,N|C';\n\t\t}\n\t\t\t\n".split("'15'").join("'" + constraint.code + "'");
     }
 
+    // Mirrors disabilitySuffersocBlock() above: compensatary_time can carry its
+    // own "Should be YES if <type> is selected in <point>" constraint (found by
+    // extractShouldBeConstraint() scanning this field's OWN Validations text,
+    // same as disabilitysuffersoc's), but this block used to hardcode the plain
+    // Yes/No validation unconditionally and silently drop that constraint —
+    // caught by the user against a real SOW row reading "...Should select Yes
+    // or No & Should be YES if \"Cerebral palsy\" is selected in 7.2."
+    function compensataryTimeBlock(){
+      var constraint = resolved.compensatary_time && resolved.compensatary_time.constraint;
+      var head = "\t//------------------ compensatary_time ---------------------\n\t$mandatory_flds['compensatary_time'] = 'reg_compensatary_time|radiobutton|1|compensatary_time';\n";
+      if (!constraint) return head + "\t$validate_flds_value['compensatary_time'] = 'reg_compensatary_time|Should be either Yes or No|Y,N|C';\n\n";
+      return head + "\tif($_POST['disability_type'] == '" + constraint.code + "' || (is_array($_POST['disability_multiple']) && in_array('" + constraint.code + "',$_POST['disability_multiple'])))\n\t{\n\t\t$validate_flds_value['compensatary_time'] = 'reg_compensatary_time|Should be Yes|Y|C';\n\t} else {\n\t\t$validate_flds_value['compensatary_time'] = 'reg_compensatary_time|Should be either Yes or No|Y,N|C';\n\t}\n\n";
+    }
+
     var parts = [];
     if (has('optdisability')) {
       parts.push("if($_POST['optdisability'] == 'Y'){\n");
       if (has('disability_category')) parts.push("\n\t// ----------------- disability_category Type ----------------\n\t$mandatory_flds['disability_category'] = 'reg_disability_category|dropdown|2|disability_category';\n\t$arr_flds['disability_category'] = 'reg_disability_category|arrDiscategory';\n\n");
       parts.push("\t// ----------------- Disability Type ----------------\n\t// $mandatory_flds['disability_type'] = 'reg_disability_type|dropdown|5|disability_type';\n\t// $arr_flds['disability_type'] = 'reg_disability_type|arrDisabilityType2';\n\n\t//------------------ disability_per ----------------\n\t// $mandatory_flds['disability_per'] = 'reg_disability_per|dropdown|5|disability_per';\n\t// $arr_flds['disability_per'] = 'reg_disability_per|arrDisabilitypercentage';\n\t//$validate_flds_value['disability_per'] = 'reg_disability_per|invalid|40,41|C';\n");
       if (has('disabilitysuffersoc')) parts.push(disabilitySuffersocBlock());
-      if (has('compensatary_time')) parts.push("\t//------------------ compensatary_time ---------------------\n\t$mandatory_flds['compensatary_time'] = 'reg_compensatary_time|radiobutton|1|compensatary_time';\n\t$validate_flds_value['compensatary_time'] = 'reg_compensatary_time|Should be either Yes or No|Y,N|C';\n\n");
+      if (has('compensatary_time')) parts.push(compensataryTimeBlock());
       parts.push("}else{\n");
       if (has('disability_category')) parts.push("\t$errmsgarr[]='disability_category|';\n");
       parts.push("\t// $errmsgarr[]='disability_type|';\n\t// $errmsgarr[]='disability_per|';\n");

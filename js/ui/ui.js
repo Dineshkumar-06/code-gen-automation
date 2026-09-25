@@ -288,10 +288,24 @@
   // be visible without leaving the page you fix it on.
   var warningsOpen = true;
 
+  // "Row 5 “Type of Disability” → category · Row 6 …" — see inputA.js's
+  // dropdownRows(). A neutral note, not a warning: it is there on every
+  // parse, so a wrong read is visible even when nothing else flags it.
+  function dropdownSummaryHtml(){
+    var pa = S._lastParseA;
+    var rows = (pa && pa.dropdownRows) || [];
+    if (!rows.length) return '';
+    return '<p class="dropdown-summary">Dropdowns read as: ' + rows.map(function(r){
+      return 'row ' + escH(r.slNo) + ' “' + escH(r.label) + '” → <b>' + escH(r.role) + '</b>';
+    }).join(' · ') + (pa.natureNaming ? ' <span class="muted">(Type / Nature of Disability naming)</span>' : '') +
+    '. Wrong? Fix it under Row mapping.</p>';
+  }
+
   function renderWarnings(warnings){
     var box = document.getElementById('alerts-box');
     var receipt = document.getElementById('s1-status');
     var n = warnings.length;
+    var summary = dropdownSummaryHtml();
 
     if (receipt) {
       // Reached only after a parse has run, so zero fields means the paste
@@ -302,16 +316,16 @@
         : '<div class="alert ' + (n ? 'alert-warn' : 'alert-ok') + '"><span class="alert-line">' +
           (n ? App.ICON.alert : App.ICON.ok) + '<span>' + S.fields.length + ' row(s) parsed' +
           (n ? ' — ' + n + ' warning(s), listed on the next step.' : ' — no warnings.') +
-          '</span></span></div>';
+          '</span></span></div>' + (S.fields.length ? summary : '');
     }
 
     if (!box) return;
     if (!n) {
-      box.innerHTML = '<div class="alert alert-ok"><span class="alert-line">' + App.ICON.ok +
+      box.innerHTML = summary + '<div class="alert alert-ok"><span class="alert-line">' + App.ICON.ok +
         '<span>Parsed — no warnings.</span></span></div>';
       return;
     }
-    box.innerHTML = '<div class="alert alert-warn">' +
+    box.innerHTML = summary + '<div class="alert alert-warn">' +
       '<button class="alert-hdr" type="button" aria-expanded="' + (warningsOpen ? 'true' : 'false') +
       '" onclick="toggleWarnings(this)">' + App.ICON.alert + '<span>' + n + ' warning(s)</span>' +
       App.ICON.caret + '</button><ul' + (warningsOpen ? '' : ' class="hidden"') + '>' +
@@ -497,6 +511,110 @@
       });
       box.appendChild(chips);
     }
+  }
+
+  // ── row mapping panel ──
+  // Which dictionary field each pasted row was claimed as, with a way to
+  // re-point it. The dictionary matches a label by its exact wording or a
+  // keyword signature, which covers paraphrases but not every SOW's own
+  // naming — this is the fallback for the rest. A choice is an INPUT to
+  // parsing (S.fieldOverrides, like S.manualAliases): the paste is re-read
+  // with it, so every downstream consumer sees the right field, not a patch.
+  var rowMapOpen = null;   // null: follow the paste (open when a row needs a look)
+
+  function entryHint(e){
+    var h = (e.labels && e.labels[0]) || (e.sig && e.sig.all ? e.sig.all.join(' … ') : '');
+    return h.length > 60 ? h.slice(0, 57) + '…' : h;
+  }
+
+  function renderRowMapPanel(parseA){
+    var box = document.getElementById('row-map-panel');
+    var rowsEl = document.getElementById('row-map-rows');
+    var rows = parseA.fields.filter(function(f){ return !f.isNote; });
+    if (!rows.length) { box.classList.add('hidden'); return; }
+    box.classList.remove('hidden');
+
+    var entries = App.DICT.entriesFor(parseA.layoutShape, { nature: parseA.natureNaming });
+    var usedBy = {};
+    rows.forEach(function(f){ if (f.postName) usedBy[f.postName] = f.slNo || String(f._row + 1); });
+
+    var unmatched = rows.filter(function(f){ return !f.postName && !f.mappedByHand; }).length;
+    var byHand = rows.filter(function(f){ return f.mappedByHand; }).length;
+    var summary = rows.length + ' rows';
+    if (unmatched) summary += ' · ' + unmatched + ' unmatched';
+    if (byHand) summary += ' · ' + byHand + ' set by hand';
+    document.getElementById('row-map-summary').textContent = summary;
+
+    var open = rowMapOpen === null ? !!(unmatched || byHand) : rowMapOpen;
+    document.getElementById('row-map-body').classList.toggle('hidden', !open);
+    document.getElementById('row-map-toggle').textContent = open ? 'Hide' : 'Show';
+
+    rowsEl.innerHTML = '';
+    rows.forEach(function(f){
+      var sl = f.slNo || String(f._row + 1);
+      var row = document.createElement('div');
+      row.className = 'cond-row row-map-row' + (!f.postName && !f.mappedByHand ? ' row-map-unmatched' : '');
+
+      var slEl = document.createElement('span');
+      slEl.className = 'row-map-sl';
+      slEl.textContent = sl;
+      row.appendChild(slEl);
+
+      var lbl = document.createElement('span');
+      lbl.className = 'row-map-label';
+      lbl.textContent = f.label;
+      lbl.title = f.label;
+      row.appendChild(lbl);
+
+      var sel = document.createElement('select');
+      nameControl(sel, 'rowmap-' + f._row, 'Field for row ' + sl);
+      var opts = ['<option value="">— not generated —</option>'];
+      entries.forEach(function(e){
+        var other = usedBy[e.postName] && e.postName !== f.postName ? ' (row ' + usedBy[e.postName] + ')' : '';
+        opts.push('<option value="' + escA(e.postName) + '"' + (e.postName === f.postName ? ' selected' : '') + '>' +
+          escH(e.postName + ' — ' + entryHint(e) + other) + '</option>');
+      });
+      sel.innerHTML = opts.join('');
+      sel.onchange = function(){ setRowOverride(f._row, sel.value); };
+      row.appendChild(sel);
+
+      if (f.mappedByHand) {
+        var reset = document.createElement('button');
+        reset.className = 'btn btn-s';
+        reset.textContent = 'Auto';
+        reset.title = 'Go back to the field this row was read as';
+        reset.onclick = function(){ delete S.fieldOverrides[String(f._row)]; rereadRows(); };
+        row.appendChild(reset);
+      }
+      rowsEl.appendChild(row);
+    });
+  }
+
+  function toggleRowMap(btn){
+    var body = document.getElementById('row-map-body');
+    rowMapOpen = body.classList.contains('hidden');
+    body.classList.toggle('hidden', !rowMapOpen);
+    btn.textContent = rowMapOpen ? 'Hide' : 'Show';
+  }
+
+  function setRowOverride(rowIndex, postName){
+    S.fieldOverrides[String(rowIndex)] = postName;
+    rereadRows();
+  }
+
+  // Re-read the same paste with the current row overrides. Field identities
+  // may have changed, so step 2's edits to conditions / popup / exclusions
+  // (keyed by field) are dropped and re-derived — value aliases and the
+  // overrides themselves are inputs and survive.
+  function rereadRows(){
+    var parseA = App.parseInputA(S.rawInputA, S._lastLayoutOverride, S.fieldOverrides);
+    S._lastParseA = parseA;
+    S.fields = parseA.fields;
+    S.noteText = parseA.noteText;
+    S._resolvedEdited = false;
+    S._popupTextEdited = false;
+    S._exclusionGroupsEdited = false;
+    regenerate();
   }
 
   // ── resolved conditions review panel ──
@@ -786,7 +904,7 @@
     // Disability in Set 1, Sub-Type of Multiple Disability in Set 2.
     var exclSource = App.exclusionSourceField(parseA);
     if (!S._exclusionGroupsEdited) {
-      S.exclusionGroups = App.parseExclusions(exclSource ? exclSource.validations : '', resolve.typeIndex, S.warnings);
+      S.exclusionGroups = App.parseExclusions(exclSource ? exclSource.validations : '', resolve.typeIndex, S.warnings, resolve.categoryIndex);
     }
 
     S.layoutSet = parseA.isSet2 ? 2 : 1;
@@ -825,6 +943,7 @@
     };
 
     renderWarnings(S.warnings);
+    renderRowMapPanel(parseA);
     renderValueAliasPanel(S.warnings, parseB.types);
     renderPopupTextRow(S.popupText);
     renderResolvedPanel(S.resolved, parseA.fields, codesFor);
@@ -843,10 +962,26 @@
     S.rawInputB = document.getElementById('input-b').value;
     renderExcelView(S.rawInputA);
 
-    var layoutOverride = document.getElementById('layout-override').value || null;
-    var parseA = App.parseInputA(S.rawInputA, layoutOverride);
+    var layout = document.getElementById('layout-override').value;
+    S._lastLayoutOverride = layout;
+
+    // Layout is a required, explicit developer choice — no auto-detect
+    // fallback (see parsing/inputA.js). The selector's placeholder option is
+    // disabled but still selectable programmatically before the developer
+    // has ever touched it, so this can't just be assumed non-empty.
+    if (!layout) {
+      S.fields = [];
+      S.warnings = [];
+      var receipt = document.getElementById('s1-status');
+      if (receipt) receipt.innerHTML = '<div class="alert alert-warn"><span class="alert-line">' +
+        App.ICON.alert + '<span>Select a layout (Set 1/2/3) above before parsing.</span></span></div>';
+      if (App.NAV) App.NAV.setParsed(false);
+      return false;
+    }
+
+    rowMapOpen = null;
+    var parseA = App.parseInputA(S.rawInputA, layout, S.fieldOverrides);
     var parseB = App.parseInputB(S.rawInputB);
-    S._lastLayoutOverride = layoutOverride;
     S._lastParseA = parseA;
     S._lastParseB = parseB;
     S.fields = parseA.fields;
@@ -871,7 +1006,7 @@
   function parseAndReview(){
     var a = document.getElementById('input-a').value;
     var b = document.getElementById('input-b').value;
-    var layout = document.getElementById('layout-override').value || null;
+    var layout = document.getElementById('layout-override').value;
     var stale = !S._lastParseA || a !== S.rawInputA || b !== S.rawInputB ||
                 layout !== S._lastLayoutOverride;
     var ok = stale ? generate() : !!(S.fields && S.fields.length);
@@ -893,9 +1028,12 @@
     S._currentSample = sample;
     document.getElementById('input-a').value = sample.inputA;
     document.getElementById('input-b').value = sample.inputB;
-    document.getElementById('layout-override').value = '';
+    // Each sample already knows its own layout (FIXTURES.samples[].set) — no
+    // reason to make the developer re-pick what loading the sample implies.
+    document.getElementById('layout-override').value = 'set' + sample.set;
     generate();
   }
+
 
   window.generate = generate;
   window.parseAndReview = parseAndReview;
@@ -905,6 +1043,7 @@
   window.downloadAllZip = downloadAllZip;
   window.toggleExcelView = toggleExcelView;
   window.toggleWarnings = toggleWarnings;
+  window.toggleRowMap = toggleRowMap;
   App.buildTabStrip = buildTabStrip;
   App.populateSamplePicker = populateSamplePicker;
   App.renderExcelView = renderExcelView;

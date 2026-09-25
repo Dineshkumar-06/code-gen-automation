@@ -113,9 +113,18 @@
       // Keyed by whichever dropdown carries the "Multiple Disabilities"
       // option (subdistypeido when the routing split exists, otherwise the
       // single sub-type dropdown) — see core/set2.js's multiTriggerField.
+      //
+      // Shape 3's sub-type dropdown holds EVERY sub-type, so keying on all of
+      // them emitted one line per sub-type with seventeen of them mapping to
+      // ''. Only the "Multiple Disabilities" key can ever open the
+      // multi-select, and ajax_getSubType_Multiple_disability.php treats a
+      // missing key and an empty one identically, so shape 3 emits just that
+      // one key — which is also exactly what the Set 3 reference config.php
+      // contains. The routing shape keeps its full key list: there the keys
+      // are the routing category's own sub-types, a short and meaningful set.
       var mulKeys = (roles.multiTriggerField === 'subdistypeido')
         ? roles.idoTypeCodes
-        : types.map(function(t){ return t.code; });
+        : (roles.multipleCode ? [roles.multipleCode] : []);
       s = '$arr_MulsubDisability_map_Edit = array(\n';
       for (i = 0; i < mulKeys.length; i++) {
         s += line(mulKeys[i], mulKeys[i] === roles.multipleCode ? roles.mulOptionCodes.join(',') : '', false);

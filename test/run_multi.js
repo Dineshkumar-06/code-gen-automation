@@ -1,8 +1,10 @@
 /* Generalization regression test — locks in behavior across all four real
    Set 1 SOWs (bpcl, iifcljul26, nitrjul26, csmcnov25), which differ in every
    way that matters: Sl No scheme, category naming, label language, and
-   validation phrasing (see core/fixtures.js). cwcsep25 (Set 2) is excluded —
-   it is expected to warn and is checked separately.
+   validation phrasing (see core/fixtures.js). cwcsep25/set2b/uiicl (Set 2/3)
+   are checked separately below, each parsed against its own known layout
+   (see FIXTURES.layoutFor() — layout selection is an explicit developer
+   choice, not autodetected; see parsing/inputA.js, 2026-09-17).
 
    These are not byte-exact golden diffs (no reference PHP/JS exists for
    three of the four) — per the agreed acceptance basis, this checks
@@ -22,9 +24,9 @@ function assertTrue(cond, label, extra){
   if (cond) { pass++; } else { fail++; console.log('FAIL:', label, extra !== undefined ? '\n  ' + JSON.stringify(extra) : ''); }
 }
 
-function run(key){
+function run(key, layoutOverride){
   const sample = App.FIXTURES.byKey(key);
-  const A = App.parseInputA(sample.inputA);
+  const A = App.parseInputA(sample.inputA, layoutOverride || App.FIXTURES.layoutFor(key));
   const B = App.parseInputB(sample.inputB);
   const R = App.resolveAll(A, B);
   const typeField = A.fields.filter(f => f.control === 'select+multiselect')[0];
@@ -32,10 +34,10 @@ function run(key){
   return { A, B, R, groups };
 }
 
-// ── every Set 1 sample: zero unmatched labels, Set 1 correctly detected ──
+// ── every Set 1 sample: zero unmatched labels against its own layout ──
 for (const key of ['bpcl', 'iifcl', 'nitr', 'csmc']) {
   const { A } = run(key);
-  assertEq(A.isSet2, false, key + ': not detected as Set 2');
+  assertEq(A.isSet2, false, key + ': set1 layout claims false for isSet2');
   const unmatched = A.warnings.filter(w => w.code === 'unmatched-label');
   assertEq(unmatched, [], key + ': zero unmatched labels');
 }
@@ -84,53 +86,52 @@ for (const key of ['bpcl', 'iifcl', 'nitr', 'csmc']) {
   assertEq(R.warnings.map(w => w.code), ['point-ref-unresolved'], 'csmc: only the SOWs own point-ref typo warns');
 }
 
-// ── cwcsep25 and set2b: both correctly detected as non-Set-1 despite having
-//    different structural shapes — labels are the signal that generalizes,
-//    not dropdown count. Both are SHAPE 3 (no "Sub-Type of Disability for
-//    <category>" routing dropdown), flagged distinctly from the Set 2 shape
-//    that actually has reference code — see parsing/inputA.js ──
+// ── cwcsep25 and set2b: picking the 'set3' layout claims both correctly
+//    despite their different structural shapes (labels are what generalizes,
+//    not dropdown count) — neither has a "Sub-Type of Disability for
+//    <category>" routing dropdown, unlike uiicl's Set 2 shape below.
+//    Layout is now an explicit developer choice (see parsing/inputA.js), so
+//    there is no detection signal left to assert on — just that the choice
+//    claims fields with zero unmatched labels. ──
 {
   const { A } = run('cwc');
-  assertTrue(A.isSet2, 'cwc: detected as a non-Set-1 layout');
+  assertTrue(A.isSet2, 'cwc (set3 layout): isSet2 true');
   assertEq(A.layoutShape, 3, 'cwc: shape 3 — one sub-type dropdown, no routing dropdown');
-  assertTrue(A.warnings.some(w => w.code === 'set3-layout'), 'cwc: set3-layout warning, not set2-layout');
-  assertTrue(!A.warnings.some(w => w.code === 'set2-layout'), 'cwc: NOT reported as the Set 2 shape');
+  // cwc has 3 genuinely SOW-specific rows this tool doesn't model at all
+  // (a CWC-provided-scribe question, a scribe-qualification textbox) — these
+  // warn as unmatched regardless of layout, not a layout-selection mistake.
+  assertEq(A.warnings.filter(w => w.code === 'unmatched-label').length, 3, 'cwc: its 3 known unmodeled rows warn as unmatched');
 }
 {
   const { A } = run('set2b');
-  assertTrue(A.isSet2, 'set2b: detected as Set 2 (3-dropdown shape, different from cwc\'s 2)');
-  assertEq(A.set2Reason, 'sub-type-label', 'set2b: detected via the sub-type label, not the inline-codes fallback');
+  assertTrue(A.isSet2, 'set2b (set3 layout): isSet2 true');
   assertEq(A.layoutShape, 3, 'set2b: shape 3 — the user flagged this as a third layout, 2026-09-11');
-  assertTrue(A.warnings.some(w => w.code === 'set3-layout'), 'set2b: set3-layout warning');
+  assertEq(A.warnings.filter(w => w.code === 'unmatched-label'), [], 'set2b: zero unmatched labels');
 }
 
 // ── uiicljul26 IS the Set 2 shape: it has the routing dropdown, and it is
 //    the only non-Set-1 sample with reference code for every output file ──
 {
   const { A } = run('uiicl');
-  assertEq(A.layoutShape, 2, 'uiicl: shape 2 — it has the "for MD/IDs" routing dropdown');
-  assertTrue(A.warnings.some(w => w.code === 'set2-layout'), 'uiicl: set2-layout warning');
-  assertTrue(!A.warnings.some(w => w.code === 'set3-layout'), 'uiicl: no set3-layout warning');
+  assertEq(A.layoutShape, 2, 'uiicl (set2 layout): shape 2 — it has the "for MD/IDs" routing dropdown');
+  assertEq(A.warnings.filter(w => w.code === 'unmatched-label'), [], 'uiicl: zero unmatched labels');
 }
 
-// ── layout override: forcing Set 1 suppresses the set2-layout warning
-//    entirely (an informed developer choice, not a guess to double-check) ──
+// ── picking the wrong layout for a paste is a real, visible mistake: it
+//    claims fields against the wrong dictionary, which shows up as unmatched
+//    labels rather than being silently corrected for you ──
 {
   const sample = App.FIXTURES.byKey('cwc');
   const A = App.parseInputA(sample.inputA, 'set1');
-  assertEq(A.isSet2, false, 'override set1: isSet2 forced false');
-  assertTrue(!A.warnings.some(w => w.code === 'set2-layout' || w.code === 'set3-layout'),
-    'override set1: no layout warning at all');
-  assertEq(A.layoutShape, 1, 'override set1: shape follows the forced layout');
+  assertEq(A.isSet2, false, 'cwc read as set1: honours the (wrong) choice');
+  assertEq(A.layoutShape, 1, 'cwc read as set1: shape follows the chosen layout');
+  assertTrue(A.warnings.some(w => w.code === 'unmatched-label'), 'cwc read as set1: its Set 2/3-only rows now warn as unmatched');
 }
-
-// ── forcing Set 2 on a paste auto-detection did NOT flag raises a distinct
-//    "double-check this" warning, since it's now going against the tool's own read ──
 {
   const sample = App.FIXTURES.byKey('bpcl');
   const A = App.parseInputA(sample.inputA, 'set2');
-  assertEq(A.isSet2, true, 'override set2 on bpcl: isSet2 forced true');
-  assertTrue(A.warnings.some(w => w.code === 'set2-forced'), 'override set2 on bpcl: set2-forced warning present (auto-detection disagreed)');
+  assertEq(A.isSet2, true, 'bpcl read as set2: honours the (wrong) choice');
+  assertTrue(A.warnings.some(w => w.code === 'unmatched-label'), 'bpcl read as set2: its Set 1-only rows (disability_category) now warn as unmatched');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
