@@ -20,6 +20,7 @@
 (function(App){
 
   var genSubmitSet1 = App.GEN && App.GEN.submit;
+  if (!genSubmitSet1) { throw new Error('submitPhp2.js: Set 1 generator missing — check script load order in index.html'); }
 
   var MULTI = 'sub_disability_multiple';
 

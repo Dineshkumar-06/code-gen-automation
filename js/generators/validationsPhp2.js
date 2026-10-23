@@ -28,6 +28,7 @@
 (function(App){
 
   var genValidationsSet1 = App.GEN && App.GEN.validations;
+  if (!genValidationsSet1) { throw new Error('validationsPhp2.js: Set 1 generator missing — check script load order in index.html'); }
 
   var MULTI = 'sub_disability_multiple';
 
@@ -256,6 +257,13 @@
     var domGuard = withRoot(guardFor(resolved, 'compensatary_time'));
     var shared = has('disabilitysuffersoc') && has('compensatary_time') && socGuard === domGuard;
 
+    // Only a code the multi-select can actually hold: a list taken from its
+    // Values cell (core/set2.js mulFlat) may not offer the constraint's
+    // sub-type at all (Indian Bank's has no Cerebral palsy).
+    function multiOffers(code){
+      return has(MULTI) && roles.mulOptionCodes.indexOf(code) !== -1;
+    }
+
     function socBody(indent){
       var s = indent + "$mandatory_flds['disabilitysuffersoc'] = 'reg_disabilitysuffersoc|radiobutton|1|disabilitysuffersoc';\n";
       var c = resolved.disabilitysuffersoc && resolved.disabilitysuffersoc.constraint;
@@ -263,7 +271,7 @@
         // "Should be YES if <type> is selected" — the constraint names ONE
         // sub-type, which can be reached through either dropdown.
         var tests = ["$_POST['" + c.whenField + "'] == '" + c.code + "'"];
-        if (has(MULTI)) {
+        if (multiOffers(c.code)) {
           tests.push("(is_array($_POST['" + MULTI + "']) && in_array(\"" + c.code + '",$_POST[\'' + MULTI + "'],true))");
         }
         s += indent + 'if (' + tests.join(' || ') + ') {\n' +
@@ -282,7 +290,7 @@
       var c = resolved.compensatary_time && resolved.compensatary_time.constraint;
       if (c && c.code) {
         var tests = ["$_POST['" + c.whenField + "'] == '" + c.code + "'"];
-        if (has(MULTI)) {
+        if (multiOffers(c.code)) {
           tests.push("(is_array($_POST['" + MULTI + "']) && in_array(\"" + c.code + '",$_POST[\'' + MULTI + "'],true))");
         }
         s += indent + 'if (' + tests.join(' || ') + ') {\n' +

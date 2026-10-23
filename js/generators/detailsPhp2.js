@@ -40,6 +40,7 @@
 (function(App){
 
   var genDetailsPhpSet1 = App.GEN && App.GEN.detailsPhp;
+  if (!genDetailsPhpSet1) { throw new Error('detailsPhp2.js: Set 1 generator missing — check script load order in index.html'); }
 
   function dbKey(postName){ return App.DICT.dbNameFor(postName); }
 

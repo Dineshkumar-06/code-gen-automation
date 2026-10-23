@@ -1,13 +1,14 @@
 # File tree
 
 Live artifact — update whenever a file is added, removed, or substantially
-repurposed. See [CLAUDE.md](CLAUDE.md) for the "why", this file is just the "what".
+repurposed. See [CLAUDE.md](CLAUDE.md) (and [CHANGELOG.md](CHANGELOG.md)) for the "why", this file is just the "what".
 
 ```
 .
 ├── PRD.md                        full spec (§1-10), phase-by-phase build plan
 ├── claude_code_start_prompt.md   session kickoff instructions (process, stop points)
-├── CLAUDE.md                     dense project state: dictionary, resolver modes, phase status
+├── CLAUDE.md                     current rules and state: layouts, dictionary, resolver, emitter rules
+├── CHANGELOG.md                  dated design write-ups (the former CLAUDE.md, verbatim)
 ├── TREE.md                       this file
 ├── README.md                     (empty placeholder, not yet written)
 ├── disability_set_1_references.txt  5 real SOWs' Input A/B pastes (no reference code) — source
@@ -226,6 +227,9 @@ repurposed. See [CLAUDE.md](CLAUDE.md) for the "why", this file is just the "wha
     │                             code: the multi-select flow, the optgroup grouping, the live
     │                             hidden mirrors, the alias round-trip that yields all three
     │                             exclusion groups, plus cwc as the no-multi-select shape-3 case
+    ├── run_indian.js            Set 2 — Indian Bank (fixture `indian`) against the user's
+    │                            hand-coded JS/validation: multi-select options from its Values
+    │                            cell, value routing to every earlier dropdown, "& Point no" chains
     ├── run_qryArrays.js         Phase 7 acceptance test (reg_qry_arrays.php)
     ├── run_langPhp.js           Phase 7 acceptance test (reg_details_lang.php)
     ├── run_queriesSql.js        Phase 7 acceptance test (disability_queries)
@@ -238,6 +242,8 @@ repurposed. See [CLAUDE.md](CLAUDE.md) for the "why", this file is just the "wha
     │                            the Row mapping panel's per-row overrides, quoted-label lookup
     │                            against the paste's own rows, and unknown Other Details headers
     ├── run_zip.js               core/zip.js round-trip test (parses its own zip back out)
+    ├── run_php_lint.js          `php -l` on every generated PHP file x every fixture; SKIPs
+    │                            when no PHP is found ($PHP_BIN, PATH, C:/xampp/php/php.exe)
     └── report.js                human-readable resolver dump for one/all fixtures — the
                                  "eyeball it" view for samples with no reference code to diff
                                  against (node test/report.js <key>, e.g. nitr)
@@ -261,7 +267,9 @@ node test/run_set2_parse.js
 node test/run_set2_resolve.js
 node test/run_set2_generators.js
 node test/run_set3_generators.js
+node test/run_indian.js
 node test/run_nature.js
+node test/run_php_lint.js
 node test/report.js nitr        # or: bpcl, iifcl, csmc, uiicl, set2b, cwc — omit for all
 ```
 
@@ -271,7 +279,7 @@ Or all of them at once (POSIX shell):
 for f in test/run_*.js; do echo "--- $f"; node "$f" | tail -1; done
 ```
 
-18 files, 730 assertions.
+19 files, 806 assertions.
 
 ## Running the app
 

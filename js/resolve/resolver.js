@@ -34,10 +34,12 @@
      - a clause can chain several point references ("point no 5.1 or 6.1"),
        because Set 2 asks the same question of two or three different
        dropdowns.
-     - bare type names with NO point reference route by code to whichever
-       dropdown actually offers them: the routing category's sub-types go to
-       `subdistypeido`, the rest to `sub_disability_type`, and all of them
-       also to `sub_disability_multiple`, which offers everything.
+     - every named value (category or sub-type, point reference or not)
+       routes by code to EVERY dropdown that offers it and comes before the
+       row being resolved: the routing category's sub-types to
+       `subdistypeido`, the rest to `sub_disability_type`, categories to
+       `disability_type`, and whatever the multi-select's own list holds to
+       `sub_disability_multiple` (set2ValueConditions).
 
    No emitter parses prose. No DOM access. */
 (function(App){
@@ -70,7 +72,9 @@
   // found by POINT_REF_RE as usual; each further one must be introduced by a
   // connector AND name a row that actually exists in this paste, so an
   // ordinary "... in point no 12 or 40% ..." cannot be mistaken for a chain.
-  var CHAINED_REF_RE = /^\s*(?:or|and|,|\/)\s*(\d+(?:\.\d+)*)\b/i;
+  // The connector may be "&" and the next reference may repeat its own
+  // "point no" — Indian Bank writes "in point no 9 & Point no 11".
+  var CHAINED_REF_RE = /^\s*(?:or|and|&|,|\/)\s*(?:(?:point|pt)\s*\.?\s*(?:no|number)?\s*\.?\s*[-–:]?\s*)?(\d+(?:\.\d+)*)\b/i;
 
   function collectPointRefs(clause, fieldsBySlNo){
     var m = clause.match(POINT_REF_RE);
@@ -284,58 +288,91 @@
   }
 
   // ── Set 2 value routing ──────────────────────────────────────────────
-  // Which sub-type dropdown offers a given code, and therefore which field a
-  // condition naming that code has to test. Only fields actually present in
-  // the paste get a condition — same has()-gating rule every emitter follows.
-  function set2RouteTypeCodes(codes, ctx){
+  // A named value (category or sub-type) is a condition on EVERY dropdown
+  // that offers it, because the candidate can pick it from any of them
+  // (user's rule, 2026-10-23: Indian Bank's 'for VI or SLD/ MI/ ASD' means
+  // the category dropdown, subdistypeido AND the multi-select). Bounded by
+  // the hierarchy: only a dropdown that comes BEFORE the row being resolved
+  // can gate it — row 10's "for HI,VI,OC/LD" is about the category dropdown,
+  // not the multi-select at row 11 that offers the same names. A dropdown
+  // the clause names by point reference is always eligible.
+  // Only fields actually present in the paste get a condition — the same
+  // has()-gating rule every emitter follows.
+  function set2ValueConditions(catCodes, typeCodes, field, refs, ctx){
     var roles = ctx.set2, out = [];
-    var isIdo = {};
-    for (var i = 0; i < roles.idoTypeCodes.length; i++) isIdo[roles.idoTypeCodes[i]] = true;
-
-    var ido = [], other = [];
-    for (var c = 0; c < codes.length; c++) (isIdo[codes[c]] ? ido : other).push(codes[c]);
-
-    if (ido.length && ctx.hasField['subdistypeido']) {
-      out.push({ field: 'subdistypeido', op: 'in', codes: uniqSortAsc(ido) });
+    var selfIdx = ctx.fields.indexOf(field);
+    var named = {};
+    for (var r = 0; r < refs.length; r++) {
+      var rf = ctx.fieldsBySlNo[refs[r]];
+      if (rf && rf.postName) named[rf.postName] = true;
     }
-    if (other.length && ctx.hasField['sub_disability_type']) {
-      out.push({ field: 'sub_disability_type', op: 'in', codes: uniqSortAsc(other) });
+    function eligible(postName){
+      if (postName === field.postName || !ctx.hasField[postName]) return false;
+      if (named[postName]) return true;
+      for (var i = 0; i < selfIdx; i++) if (ctx.fields[i].postName === postName) return true;
+      return false;
     }
-    // The multi-select offers every sub-type, so it answers for all of them.
-    if (ctx.hasField['sub_disability_multiple']) {
-      out.push({ field: 'sub_disability_multiple', op: 'in', codes: uniqSortAsc(codes) });
+    function offered(codes, list){
+      var set = {};
+      for (var i = 0; i < list.length; i++) set[list[i]] = true;
+      return codes.filter(function(c){ return set[c]; });
+    }
+    function push(postName, codes){
+      if (codes.length && eligible(postName)) out.push({ field: postName, op: 'in', codes: uniqSortAsc(codes) });
+    }
+
+    var mulCats = [], mulTypes = [];
+    for (var m = 0; m < roles.mulOptions.length; m++) {
+      (roles.mulOptions[m].kind === 'category' ? mulCats : mulTypes).push(roles.mulOptions[m].code);
+    }
+
+    if (catCodes.length) {
+      push('disability_type', catCodes);
+      if (roles.mulFlat) {
+        push('sub_disability_multiple', offered(catCodes, mulCats));
+      } else if (named['sub_disability_multiple']) {
+        // The grouped multi-select offers no category, only its sub-types:
+        // a category named AT it means any sub-type of that category.
+        var sub = [];
+        for (var c = 0; c < catCodes.length; c++) {
+          var csv = String(ctx.categoryMapping[catCodes[c]] || '');
+          sub = sub.concat(csv ? csv.split(',').filter(Boolean) : []);
+        }
+        push('sub_disability_multiple', offered(sub, mulTypes));
+      }
+    }
+
+    if (typeCodes.length) {
+      var isIdo = {};
+      for (var i = 0; i < roles.idoTypeCodes.length; i++) isIdo[roles.idoTypeCodes[i]] = true;
+      push('subdistypeido', typeCodes.filter(function(c){ return isIdo[c]; }));
+      push('sub_disability_type', typeCodes.filter(function(c){ return !isIdo[c]; }));
+      push('sub_disability_multiple', offered(typeCodes, mulTypes));
     }
     return out;
   }
 
-  // A CATEGORY name ("OC", "HI", "MD/ID") is answered by the category
-  // dropdown itself, and — when the clause also points at the multi-select —
-  // by the multi-select holding any sub-type of that category, which is the
-  // same fact stated at the finer grain.
-  function set2CategoryConditions(catCodes, refs, ctx){
-    var out = [{ field: 'disability_type', op: 'in', codes: uniqSortAsc(catCodes) }];
-
-    var namesMulti = false;
-    for (var r = 0; r < refs.length; r++) {
-      var f = ctx.fieldsBySlNo[refs[r]];
-      if (f && f.postName === 'sub_disability_multiple') { namesMulti = true; break; }
+  // PRD §7 — surface names we could not resolve rather than dropping them.
+  function warnUnresolvedNames(clause, field, index, warnings){
+    var missed = App.findUnresolvedAbbrevs(clause, index);
+    for (var u = 0; u < missed.length; u++) {
+      warnings.push({ code: 'value-name-unmatched', abbrev: missed[u], slNo: field.slNo,
+        msg: 'Row ' + field.slNo + ': "' + missed[u] + '" looks like a disability value but has no match in the type table — ' +
+             'add it in the review panel if it belongs.' });
     }
-    // Deliberately NOT defaulted to true for a clause with no point reference
-    // at all: "Should be enabled & mandatory for VI, HI, OC" states which
-    // categories the dropdown serves, which is a fact about the category
-    // dropdown only. Widening it to the multi-select there would attach a
-    // condition the requirement never asked for.
+  }
 
-    if (namesMulti && ctx.hasField['sub_disability_multiple']) {
-      var sub = [];
-      for (var c = 0; c < catCodes.length; c++) {
-        var csv = String(ctx.categoryMapping[catCodes[c]] || '');
-        var parts = csv ? csv.split(',') : [];
-        for (var p = 0; p < parts.length; p++) if (parts[p]) sub.push(parts[p]);
-      }
-      if (sub.length) out.push({ field: 'sub_disability_multiple', op: 'in', codes: uniqSortAsc(sub) });
+  // Category and sub-type names read in ONE scan, so a clause naming both
+  // ("for VI or SLD/ MI/ ASD") keeps both, and a name is read as a category
+  // when it is one. Codes come back prefixed c:/t: (see resolveAll).
+  function set2ScanValues(clause, ctx){
+    var scan = App.scanTypeNames(clause, ctx.valueIndex);
+    var cats = [], types = [];
+    for (var i = 0; i < scan.codes.length; i++) {
+      var code = scan.codes[i];
+      (code.charAt(0) === 'c' ? cats : types).push(code.slice(2));
     }
-    return out;
+    return { cats: cats, types: types };
   }
 
   function resolveEnablement(field, cleanedText, ctx, warnings){
@@ -391,28 +428,27 @@
 
         var refs = ctx.set2 ? collectPointRefs(clause, ctx.fieldsBySlNo) : (pm ? [pm[1]] : []);
 
-        // Set 2 — a CATEGORY named here is a value of the category dropdown.
-        // Checked before type names because the two indexes are disjoint and
-        // a category-only clause would otherwise fall through to `continue`.
-        if (ctx.set2 && field.postName !== 'disability_type') {
-          var catScan = App.scanTypeNames(clause, ctx.categoryIndex);
-          if (catScan.codes.length) {
-            conditions = conditions.concat(set2CategoryConditions(catScan.codes, refs, ctx));
-            continue;
-          }
+        // Set 2 — category AND sub-type names, each routed to every eligible
+        // dropdown that offers it (set2ValueConditions).
+        if (ctx.set2) {
+          var vals = set2ScanValues(clause, ctx);
+          if (field.postName === 'disability_type') vals.cats = [];
+          if (!vals.cats.length && !vals.types.length) continue;
+          if (vals.types.length) warnUnresolvedNames(clause, field, ctx.valueIndex, warnings);
+          for (var vr = 0; vr < refs.length; vr++) resolvePointRefField(refs[vr], ctx, field.slNo, warnings);
+          var routedV = set2ValueConditions(vals.cats, vals.types, field, refs, ctx);
+          if (routedV.length) { conditions = conditions.concat(routedV); continue; }
+          warnings.push({ code: 'value-name-no-dropdown', slNo: field.slNo,
+            msg: 'Row ' + field.slNo + ': the values named here are not offered by any dropdown above this row, ' +
+                 'so no condition was generated from them. Add it in the review panel if one is meant.' });
+          continue;
         }
 
         // Otherwise: whatever type names appear here are real values.
         var scan = App.scanTypeNames(clause, ctx.typeIndex);
         if (!scan.codes.length) continue;
 
-        // PRD §7 — surface names we could not resolve rather than dropping them.
-        var missed = App.findUnresolvedAbbrevs(clause, ctx.typeIndex);
-        for (var u = 0; u < missed.length; u++) {
-          warnings.push({ code: 'value-name-unmatched', abbrev: missed[u], slNo: field.slNo,
-            msg: 'Row ' + field.slNo + ': "' + missed[u] + '" looks like a disability value but has no match in the type table — ' +
-                 'add it in the review panel if it belongs.' });
-        }
+        warnUnresolvedNames(clause, field, ctx.typeIndex, warnings);
 
         var attached = false;
         for (var rr = 0; rr < refs.length; rr++) {
@@ -423,12 +459,6 @@
           }
         }
         if (attached) continue;
-
-        if (ctx.set2) {
-          // No point reference: route each code to the dropdown offering it.
-          var routed = set2RouteTypeCodes(uniqSortAsc(scan.codes), ctx);
-          if (routed.length) { conditions = conditions.concat(routed); continue; }
-        }
 
         // No explicit reference — the SOW is naming disability types
         // directly ("Enabled and Mandatory for B /LV OR Mental Illness").
@@ -769,7 +799,7 @@
       var catField = parseA.fields.filter(function(x){ return x.postName === 'disability_category'; })[0];
       if (catField && POPUP_LEAD_RE.test(catField.validations || '')) popupField = catField;
     }
-    var set2 = null, categoryIndex = null;
+    var set2 = null, categoryIndex = null, valueIndex = null;
     if (parseA.isSet2) {
       set2 = App.SET2.roles(parseA, parseB);
       warnings = warnings.concat(set2.warnings);
@@ -777,6 +807,17 @@
         return { code: c.code, name: c.label };
       }));
       popupField = parseA.fields.filter(function(x){ return x.postName === 'disability_type'; })[0] || null;
+      // Categories and sub-types in one index (set2ScanValues), codes
+      // prefixed so the two separately-numbered lists cannot collide. The
+      // developer's value aliases name sub-types, so they map onto t:.
+      var prefixedAliases = {};
+      for (var ak in (manualAliases || {})) {
+        if (Object.prototype.hasOwnProperty.call(manualAliases, ak)) prefixedAliases[ak] = 't:' + manualAliases[ak];
+      }
+      valueIndex = App.buildTypeIndex(
+        (parseB.categories || []).map(function(c){ return { code: 'c:' + c.code, name: c.label }; })
+          .concat((parseB.types || []).map(function(t){ return { code: 't:' + t.code, name: t.name }; })),
+        prefixedAliases);
     }
 
     var ctx = {
@@ -787,6 +828,7 @@
       typeFieldPostName: typeField ? typeField.postName : null,
       set2: set2,
       categoryIndex: categoryIndex,
+      valueIndex: valueIndex,
       categoryMapping: (parseB && parseB.mapping) || {}
     };
 

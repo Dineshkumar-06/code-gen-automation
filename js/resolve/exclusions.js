@@ -103,6 +103,12 @@
     return clustersByShouldNotSelect(text) || clustersByOnlyOneFrom(text);
   }
 
+  // Whether the cell states an exclusion rule at all. core/set2.js asks this
+  // before taking the multi-select's options from its Values cell.
+  function hasExclusionRule(text){
+    return !!extractClusterTexts(String(text || ''));
+  }
+
   // Set 2/3 clusters name the PARENT category as well as the members
   // ("... can select only one disability from LD (OA/OL/BA/BL/OAL)"). A
   // category is the grouping, never a member of it, so it must not be
@@ -186,5 +192,6 @@
 
   App.parseExclusions = parseExclusions;
   App.exclusionSourceField = exclusionSourceField;
+  App.hasExclusionRule = hasExclusionRule;
 
 })(window.App = window.App || {});

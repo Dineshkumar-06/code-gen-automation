@@ -27,6 +27,7 @@
 (function(App){
 
   var genDetailsJsSet1 = App.GEN && App.GEN.detailsJs;
+  if (!genDetailsJsSet1) { throw new Error('detailsJs2.js: Set 1 generator missing — check script load order in index.html'); }
 
   function jsStr(s){
     return "'" + String(s == null ? '' : s).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n') + "'";
@@ -118,6 +119,7 @@
     var compansMulti = codesFor(resolved.compans_time, 'sub_disability_multiple');
     var socCats      = codesFor(resolved.disabilitysuffersoc, 'disability_type');
     var socMulti     = codesFor(resolved.disabilitysuffersoc, 'sub_disability_multiple');
+    var scribeCats   = codesFor(resolved.optscribe, 'disability_type');
     var scribeIdo    = codesFor(resolved.optscribe, 'subdistypeido');
     var scribeSub    = codesFor(resolved.optscribe, 'sub_disability_type');
     var scribeMulti  = codesFor(resolved.optscribe, 'sub_disability_multiple');
@@ -283,8 +285,16 @@
       return wrote3 ? h3 : '';
     }
 
+    // A new sub-type clears the cerebral-palsy / dominant-hand ANSWERS (the
+    // "Should be YES if Cerebral palsy" rule depends on it) but leaves both
+    // questions enabled: they hang off the category, not the sub-type. Only
+    // the two "If Yes" follow-ups go back to disabled. That is the uiicl
+    // reference's own handler; it used to disable all four, which locked an
+    // OC/LD or HI candidate out of two mandatory questions (Indian Bank).
     if (has('sub_disability_type') && trigger !== 'sub_disability_type') {
-      var r = resetSocGroup('\t');
+      var r = propLine(has, ['disabilitysuffersoc', 'compensatary_time'], "'checked', false", '\t') +
+              propLine(has, ['compensatory', 'compensatory1'], DISABLE, '\t') +
+              clearHidden('\t');
       if (r) p.push('$("#sub_disability_type").change(function () {\n' + r + '});\n\n');
     }
     if (trigger && has(trigger)) p.push(triggerHandler());
@@ -334,6 +344,14 @@
       for (var y = 0; y < scribeY.length; y++) {
         reads += '\tvar ds' + y + " = $('input[name=" + scribeY[y] + "]:checked').val();\n";
         test.push('ds' + y + " == 'Y'");
+      }
+      // A category named for the scribe ("Enabled and Mandatory for VI ...")
+      // was reaching reg_details.php and the validation but not this
+      // handler, so picking VI switched the question OFF. Read in the shared
+      // body, so the click and change handlers both declare it.
+      if (has('disability_type') && scribeCats.length) {
+        reads += '\tvar dsCat = $("#disability_type").val();\n';
+        test.push('(' + anyEquals('dsCat', scribeCats) + ')');
       }
       if (has('subdistypeido') && scribeIdo.length) {
         reads += '\tvar dsIdo = $("#subdistypeido").val();\n';
@@ -502,7 +520,9 @@
       p.push(SUBTYPE_MULTIPLE_HELPERS
         .split('%TRIGGER%').join(trigger)
         .split('%OPTGROUPS%').join(
-          optgroupBlocks(ctx.parseB.categories || [], ctx.parseB.mapping || {}, roles.mulOptionCodes)));
+          // A Values-cell list (roles.mulFlat) has no grouping: no
+          // categories in, so optgroupBlocks() takes its flat branch.
+          optgroupBlocks(roles.mulFlat ? [] : (ctx.parseB.categories || []), ctx.parseB.mapping || {}, roles.mulOptionCodes)));
     }
 
     return p.join('').replace(/\s+$/, '') + '\n';

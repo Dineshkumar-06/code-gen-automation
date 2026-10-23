@@ -10,7 +10,8 @@
      - every OTHER category routes through `sub_disability_type`;
      - one sub-type UNDER the IDO category is the "Multiple Disabilities"
        entry, and picking it opens `sub_disability_multiple`, whose option
-       list is every sub-type in the paste except that entry itself.
+       list is every sub-type in the paste except that entry itself — or,
+       when its Values cell lists the options, those (listedMultiOptions).
 
    Two independent signals identify the IDO category, for the same reason
    parsing/inputA.js's Set 2 detection has two (prose wording is per-SOW):
@@ -128,11 +129,16 @@
         : (fieldByPostName(fields, 'sub_disability_type') ? 'sub_disability_type' : null);
     }
 
-    // Options offered by the multi-select: every sub-type in the paste except
-    // the "Multiple Disabilities" entry that opened it.
-    var mulOptionCodes = types
-      .map(function(ty){ return ty.code; })
-      .filter(function(code){ return code !== multipleCode; });
+    // Options offered by the multi-select: by default every sub-type in the
+    // paste except the "Multiple Disabilities" entry that opened it. When the
+    // row's own Values cell lists the options instead, those are the list —
+    // see listedMultiOptions().
+    var listed = listedMultiOptions(fieldByPostName(fields, 'sub_disability_multiple'),
+      parseA, categories, types, mapping, multipleCode, idoCategoryCode, warnings);
+    var mulOptions = listed || types
+      .filter(function(ty){ return ty.code !== multipleCode; })
+      .map(function(ty){ return { code: ty.code, name: ty.name, kind: 'type' }; });
+    var mulOptionCodes = mulOptions.map(function(o){ return o.code; });
 
     return {
       idoCategoryCode: idoCategoryCode || null,
@@ -142,8 +148,82 @@
       multipleCode: multipleCode,
       multiTriggerField: multiTriggerField,
       mulOptionCodes: mulOptionCodes,
+      mulOptions: mulOptions,
+      mulFlat: !!listed,
       warnings: warnings
     };
+  }
+
+  // The multi-select's options as its own Values cell lists them — Indian
+  // Bank's 'Select from "OC/LD"/ VI/ HI/ SLD/ MI/ ASD' is three CATEGORIES
+  // plus the routing category's sub-types, not the sub-type list. Used only
+  // when (user's rule, 2026-10-23) the Values cell does not say the options
+  // are sub-groups AND no exclusion rule is stated: both known exclusion SOWs
+  // (uiicl, set2b) list categories in Values too but mean "one sub-type from
+  // each", which is the grouped default. Each name keeps the code it already
+  // has (category code / sub-type code), in Input B order, flat. Returns null
+  // to keep the default.
+  var SUBGROUP_RE = /\bsub[\s-]*(?:types?|groups?|categor)/i;
+
+  function listedMultiOptions(field, parseA, categories, types, mapping, multipleCode, idoCategoryCode, warnings){
+    if (!field || !field.values || SUBGROUP_RE.test(field.values)) return null;
+    var exclSource = App.exclusionSourceField ? App.exclusionSourceField(parseA) : field;
+    if (App.hasExclusionRule && App.hasExclusionRule((exclSource || field).validations || '')) return null;
+
+    // One index over both lists, categories first, so a name is read once
+    // and as a category when it is one.
+    var index = App.buildTypeIndex(
+      categories.map(function(c){ return { code: 'c:' + c.code, name: c.label }; })
+        .concat(types.map(function(t){ return { code: 't:' + t.code, name: t.name }; })));
+    var scan = App.scanTypeNames(field.values, index);
+    var picked = {};
+    for (var i = 0; i < scan.codes.length; i++) picked[scan.codes[i]] = true;
+    if (picked['c:' + idoCategoryCode]) delete picked['c:' + idoCategoryCode];   // it is what opened the list
+    if (picked['t:' + multipleCode]) delete picked['t:' + multipleCode];
+
+    var out = [], byCode = {};
+    for (var c = 0; c < categories.length; c++) {
+      var cat = categories[c];
+      if (picked['c:' + cat.code]) out.push({ code: cat.code, name: cat.label, kind: 'category' });
+      var csv = String(mapping[cat.code] || '');
+      var codes = csv ? csv.split(',') : [];
+      for (var k = 0; k < codes.length; k++) {
+        if (!picked['t:' + codes[k]]) continue;
+        out.push({ code: codes[k], name: typeName(types, codes[k]), kind: 'type' });
+      }
+    }
+    if (out.length < 2) return null;
+
+    // Category and sub-type codes are numbered separately, so "VI" (02) and
+    // "OL" (02) listed together cannot both be keys of one array.
+    for (var o = 0; o < out.length; o++) {
+      if (byCode[out[o].code]) {
+        warnings.push({ code: 'multi-values-code-clash',
+          msg: 'The multi-select\'s Values cell lists "' + byCode[out[o].code].name + '" and "' + out[o].name +
+               '", which share code ' + out[o].code + ' (categories and sub-types are numbered separately). ' +
+               'Using every sub-type as the option list instead.' });
+        return null;
+      }
+      byCode[out[o].code] = out[o];
+    }
+
+    // findUnresolvedAbbrevs splits on "/", so a matched "OC/LD" comes back as
+    // "OC" and "LD"; a token that is part of a name that DID match is not a miss.
+    var matchedWords = {};
+    for (var w = 0; w < scan.matched.length; w++) {
+      var words = scan.matched[w].split(/[^a-z0-9]+/);
+      for (var x = 0; x < words.length; x++) if (words[x]) matchedWords[words[x]] = true;
+    }
+    var missed = (App.findUnresolvedAbbrevs ? App.findUnresolvedAbbrevs(field.values, index) : [])
+      .filter(function(tok){ return !matchedWords[normName(tok)]; });
+    if (missed.length) {
+      warnings.push({ code: 'multi-values-unmatched',
+        msg: 'The multi-select\'s Values cell names ' + missed.map(function(m){ return '"' + m + '"'; }).join(', ') +
+             ', which match no category or sub-type in Input B, so they are not offered.' });
+    }
+    warnings.push({ code: 'multi-values-from-column',
+      msg: 'Multi-select options taken from its Values cell: ' + out.map(function(x){ return x.name; }).join(', ') + '.' });
+    return out;
   }
 
   function labelOf(categories, code){

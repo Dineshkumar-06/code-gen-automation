@@ -41,6 +41,7 @@
 (function(App){
 
   var genConfigSet1 = App.GEN && App.GEN.config;
+  if (!genConfigSet1) { throw new Error('config2.js: Set 1 generator missing — check script load order in index.html'); }
 
   function phpStr(s){ return String(s == null ? '' : s).replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }
 
@@ -106,8 +107,12 @@
 
     // ── row 6.1: the multi-select ──
     if (has(fields, 'sub_disability_multiple')) {
+      // A list taken from the row's own Values cell (core/set2.js mulFlat) is
+      // the whole array: validations.php and PrintArrSub_disDetails() both
+      // read every entry of it.
       s = '$arr_mulsubDisabilityType2 = array(\n';
-      for (i = 0; i < types.length; i++) s += line(types[i].code, types[i].name, false);
+      var mulList = roles.mulFlat ? roles.mulOptions : types;
+      for (i = 0; i < mulList.length; i++) s += line(mulList[i].code, mulList[i].name || mulList[i].label, false);
       parts.push(s + ');');
 
       // Keyed by whichever dropdown carries the "Multiple Disabilities"

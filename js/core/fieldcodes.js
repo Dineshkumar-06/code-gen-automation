@@ -82,7 +82,11 @@
       // Shape 3 has no routing split, so idoTypeCodes is empty and its one
       // sub-type dropdown keeps every type — which is exactly what it serves.
       if (postName === 'sub_disability_type') return except(types, roles && roles.idoTypeCodes);
-      if (postName === 'sub_disability_multiple') return only(types, roles && roles.mulOptionCodes);
+      // Its own list, which may mix category and sub-type codes when the
+      // SOW's Values cell names them (core/set2.js listedMultiOptions).
+      if (postName === 'sub_disability_multiple') {
+        return ((roles && roles.mulOptions) || []).map(function(o){ return { code: o.code, name: o.name }; });
+      }
       return types;
     }
 

@@ -264,6 +264,9 @@
   function sigMatches(norm, sig){
     if (!sig) return false;
     var i;
+    // Spacing inside brackets is not wording: Indian Bank writes "Sec 2( r )"
+    // where the signature (and every other SOW) has "2(r)".
+    norm = norm.replace(/\(\s+/g, '(').replace(/\s+\)/g, ')');
     if (sig.all) {
       for (i = 0; i < sig.all.length; i++) if (norm.indexOf(sig.all[i]) === -1) return false;
     }

@@ -31,6 +31,7 @@
 (function(App){
 
   var genFunctionsPhpSet1 = App.GEN && App.GEN.functionsPhp;
+  if (!genFunctionsPhpSet1) { throw new Error('functionsPhp2.js: Set 1 generator missing — check script load order in index.html'); }
 
   // Inside a PHP double-quoted string, printed into an HTML attribute that
   // the reference delimits with single quotes.
@@ -74,6 +75,25 @@
       return '<?php\n\n' +
         '// Nothing to define here for this paste: PrintArrSub_disDetails() prints the\n' +
         "// multi-select's <option> list, and this SOW has no multi-select field.\n";
+    }
+
+    // A list taken from the Values cell mixes categories and sub-types, so
+    // there is nothing to group by: one flat loop over the array, which then
+    // holds exactly those options (config2.js).
+    if (roles.mulFlat) {
+      return '<?php\n\n' +
+        'function PrintArrSub_disDetails($in_selected)\n' +
+        '\t{\n' +
+        '\t\t$selected = explode(",", $in_selected);\n\n' +
+        '\t\tglobal $arr_mulsubDisabilityType2;\n\n' +
+        '\t\tforeach ($arr_mulsubDisabilityType2 as $k => $v) {\n' +
+        '\t\t\tprint "<option value=\'$k\'";\n' +
+        '\t\t\tif (isset($in_selected) && in_array($k, $selected)) {\n' +
+        '\t\t\t\tprint " selected";\n' +
+        '\t\t\t}\n' +
+        '\t\t\tprint ">$v</option>";\n' +
+        '\t\t}\n' +
+        '\t}\n';
     }
 
     var offered = {};
