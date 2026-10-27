@@ -281,7 +281,7 @@ Not regressions. Each was confirmed with the user; see CHANGELOG.md.
 for f in test/run_*.js; do echo "--- $f"; node "$f" | tail -1; done
 ```
 
-20 files, 877 assertions. `node test/report.js <key>` dumps resolver output
+20 files, 882 assertions. `node test/report.js <key>` dumps resolver output
 for eyeballing. Fixtures live in `js/core/fixtures.js`
 (`bpcl iifcl nitr csmc nature` Set 1, `uiicl indian` Set 2, `set2b cwc`
 Set 3). `indian` is checked against the user's hand-coded JS/validation

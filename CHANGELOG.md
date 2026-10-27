@@ -11,6 +11,25 @@ are the originals CLAUDE.md now summarises.
 
 # Disability Section Code Generator
 
+## Set 1 scribe handlers gated on row presence (2026-10-27)
+
+Audit of generated `reg_details.js` selectors against `reg_details.php`
+markup. Two real leftovers fixed; generated JS is byte-identical for every
+fixture.
+
+1. `.optscribeset`/`.optscribesetchange` read `disabilitysuffersoc`,
+   `compensatary_time` and `scribe1` whether or not the SOW had those rows.
+   Each declaration/condition is now emitted only when `has()` (an absent
+   radio read `undefined`, so behaviour was the same; this matches Set 2 and
+   the gate-on-presence rule).
+2. Set 1's "N" radio for `compensatary_time` carried `name=` twice (copied
+   from the BPCL reference). Removed.
+
+Deliberately left: `.scribe1`, `.compensatory2`, `.disability_certify`,
+`.optdisability_40less` inside the 40less handler and the
+`depservice`/`.depdisability*` carryover refer to host-application markup
+this tool does not emit.
+
 ## Indian Bank: multi-select from its Values cell, value routing (2026-10-23)
 
 **Reported by the user** with `references/SOW.xlsx` (Indian Bank

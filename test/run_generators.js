@@ -127,5 +127,29 @@ for (const key of ['bpcl', 'iifcl', 'nitr', 'csmc', 'cwc', 'set2b']) {
   }
 }
 
+// ── Set 1 scribe handlers read only the rows the SOW has; the "N" radio
+//    carries one name attribute ──
+{
+  const ctx = ctxFor('bpcl');
+  const php = App.GEN.detailsPhp(ctx);
+  assertTrue(!/name="compensatary_time"\s+name=/.test(php), 'bpcl detailsPhp: no duplicate name attribute on compensatary_time');
+
+  function jsWithout(drop){
+    const c = ctxFor('bpcl');
+    c.parseA.fields = c.parseA.fields.filter(f => drop.indexOf(f.postName) < 0);
+    return App.GEN.detailsJs(c);
+  }
+  const full = jsWithout([]);
+  assertTrue(full.indexOf("var ds1 = $('input[name=disabilitysuffersoc]") >= 0 && full.indexOf("if(ds1 == 'Y' ||ds2 == 'Y' || ds3") >= 0,
+    'bpcl detailsJs: both scribe-trigger radios are read when both rows exist');
+  const noDs = jsWithout(['disabilitysuffersoc', 'compensatary_time', 'scribe1']);
+  let parses = true; try { new Function(noDs); } catch (e) { parses = false; }
+  assertTrue(parses, 'detailsJs without the scribe-trigger rows still parses');
+  const h = noDs.slice(noDs.indexOf('.optscribeset").click'), noDs.indexOf('.optscribesetchange'));
+  assertTrue(h.indexOf('ds1') < 0 && h.indexOf('ds2') < 0 && h.indexOf("name='scribe1'") < 0,
+    'optscribeset handler does not read absent disabilitysuffersoc/compensatary_time/scribe1');
+  assertTrue(h.indexOf("if((ds3 == '01'") >= 0, 'optscribeset handler keeps the scribe-code test when no trigger radio exists');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
